@@ -1,0 +1,14 @@
+{
+    "name": "PlaytestLab.Bridge.Ugui",
+    "rootNamespace": "PlaytestLab",
+    "references": ["PlaytestLab.Bridge", "UnityEngine.UI"],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

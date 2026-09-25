@@ -1,0 +1,11 @@
+{
+  "name": "CoinLine (Godot)",
+  "build": "",
+  "adapter": ".playtest/adapter.mjs",
+  "created": 1790378242677,
+  "current": "R1",
+  "nextRun": 2,
+  "integrations": {
+    "gameStudio": "auto"
+  }
+}

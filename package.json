@@ -1,0 +1,11 @@
+{
+  "name": "playtest-lab",
+  "version": "0.1.0",
+  "description": "Playtest group for any game: headless bot players, AI persona playtesters, and prioritized playtest reports. Claude Code skill + zero-dependency CLI.",
+  "license": "MIT",
+  "bin": { "playtest-lab": "lab/lab.js" },
+  "scripts": { "test": "node --test" },
+  "engines": { "node": ">=20" },
+  "keywords": ["playtesting", "game-dev", "qa", "bots", "ai-agents", "unity", "godot", "claude-code"],
+  "repository": { "type": "git", "url": "https://github.com/mhwangbo/playtest-lab.git" }
+}

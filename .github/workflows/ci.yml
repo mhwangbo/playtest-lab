@@ -1,0 +1,27 @@
+name: ci
+on:
+  push:
+  pull_request:
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: [20, 22]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: npm test
+      - name: CLI smoke test
+        shell: bash
+        run: |
+          node lab/lab.js help
+          mkdir -p "$RUNNER_TEMP/game"
+          node lab/lab.js init --game "$RUNNER_TEMP/game" --name Smoke
+          cp test/fixtures/line.adapter.mjs "$RUNNER_TEMP/game/.playtest/adapter.mjs"
+          node lab/lab.js --game "$RUNNER_TEMP/game" run new --label ci
+          node lab/lab.js --game "$RUNNER_TEMP/game" bots --runs 10
+          node lab/lab.js --game "$RUNNER_TEMP/game" report

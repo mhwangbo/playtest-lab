@@ -1,0 +1,18 @@
+node_modules/
+__pycache__/
+*.pyc
+.env
+# Unity sample project
+examples/unity-coinline/Library/
+examples/unity-coinline/Temp/
+examples/unity-coinline/Logs/
+examples/unity-coinline/UserSettings/
+examples/unity-coinline/Builds/
+examples/unity-coinline/obj/
+examples/unity-coinline/*.csproj
+examples/unity-coinline/*.sln
+# per-run lab output
+**/.playtest/runs/
+
+# Godot
+.godot/

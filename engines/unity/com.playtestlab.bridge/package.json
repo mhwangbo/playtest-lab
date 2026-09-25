@@ -1,0 +1,13 @@
+{
+  "name": "com.playtestlab.bridge",
+  "version": "0.2.0",
+  "displayName": "Playtest Lab Bridge",
+  "description": "Lets Playtest Lab bots and AI persona playtesters drive a Unity build over localhost (protocol playtest-bridge/1). Inactive unless launched with -playtestPort <port>.",
+  "unity": "2022.3",
+  "author": {
+    "name": "mhwangbo"
+  },
+  "dependencies": {
+    "com.unity.ugui": "2.0.0"
+  }
+}

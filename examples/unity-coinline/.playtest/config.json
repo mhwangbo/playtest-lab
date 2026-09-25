@@ -1,0 +1,22 @@
+{
+  "name": "CoinLine",
+  "build": "Builds/Win/CoinLine.exe",
+  "adapter": ".playtest/adapter.mjs",
+  "created": 1790364647634,
+  "current": "R2",
+  "nextRun": 3,
+  "plugins": {
+    "jev": {
+      "enabled": false,
+      "approved": false,
+      "endpoint": "",
+      "model": "",
+      "keyEnv": "JEV_API_KEY"
+    },
+    "laya": {
+      "enabled": false,
+      "approved": false,
+      "python": "python"
+    }
+  }
+}

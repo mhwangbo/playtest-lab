@@ -1,0 +1,14 @@
+{
+    "name": "PlaytestLab.Bridge.Editor",
+    "rootNamespace": "PlaytestLab.Editor",
+    "references": ["PlaytestLab.Bridge"],
+    "includePlatforms": ["Editor"],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
