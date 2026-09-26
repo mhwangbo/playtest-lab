@@ -15,6 +15,9 @@ function freshLab() {
   return { lab, run, dir };
 }
 
+/** Personas must log notes before a verdict counts. */
+const notes = (lab, run, n = 3) => { for (let i = 0; i < n; i++) lab.record(run, 'note', { persona: 'first-timer', text: `note ${i}` }); };
+
 const verdict = (extra = {}) => ({
   persona: 'first-timer', rating: 3, replay: 'yes', summary: 'ok',
   unsure: ['a', 'b', 'c'],
@@ -35,14 +38,24 @@ test('classifier maps common feedback to categories', () => {
   assert.strictEqual(classifyText('I love this, so relaxing').sentiment, 'positive');
 });
 
+test('persona verdict requires recorded notes', () => {
+  const { lab, run } = freshLab();
+  notes(lab, run, 2);
+  assert.throws(() => lab.record(run, 'done', verdict({ noIssues: true })), /at least 3 recorded notes/);
+  notes(lab, run, 1);
+  assert.doesNotThrow(() => lab.record(run, 'done', verdict({ noIssues: true })));
+});
+
 test('persona verdict requires 3 unsure moments and all six scores', () => {
   const { lab, run } = freshLab();
+  notes(lab, run);
   assert.throws(() => lab.record(run, 'done', verdict({ unsure: ['only one'], noIssues: true })), /3 moments/);
   assert.throws(() => lab.record(run, 'done', verdict({ scores: { clarity10s: 3 }, noIssues: true })), /scores/);
 });
 
 test('persona cannot finish without recorded issues or an explicit noIssues', () => {
   const { lab, run } = freshLab();
+  notes(lab, run);
   assert.throws(() => lab.record(run, 'done', verdict()), /noIssues/);
   lab.record(run, 'done', verdict({ issues: [{ title: 'Menu text too small', severity: 'P3', category: 'accessibility' }] }));
   const issues = lab.readLines(run, 'issues.jsonl');
@@ -52,6 +65,7 @@ test('persona cannot finish without recorded issues or an explicit noIssues', ()
 
 test('issues recorded earlier count toward the verdict', () => {
   const { lab, run } = freshLab();
+  notes(lab, run);
   lab.record(run, 'issue', { persona: 'first-timer', title: 'Hint unclear', severity: 'P2', category: 'clarity' });
   assert.doesNotThrow(() => lab.record(run, 'done', verdict()));
 });

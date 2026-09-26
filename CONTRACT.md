@@ -49,6 +49,18 @@ export const bridge = { command: 'Builds/Win/Game.exe', args: ['-batchmode','-no
 ```
 Omit `command` (and set `port`) to attach to an already-running game, e.g. Unity Play Mode.
 
+Working directory: `bridge.cwd` if set (relative to the game folder). Otherwise a command inside the game folder
+(a built player) runs from its own folder, and anything else (an engine binary such as `godot` on PATH or installed
+elsewhere) runs from the game folder, so `--path .` works without setting `cwd`.
+
+Reset timing: Godot replies to `reset` without running a frame when the target is ready right away, so the first
+`step` starts on tick 0. Unity (and a Godot target whose `is_ready()` is false) runs frames until ready, so a target
+that advances its sim in `Update`/`_process` should not step before its first `apply_action`.
+
+Persona mode (`personaBridge`): `lab.js play bot <policy> --frames N` hands control to one of the adapter's policies
+for N frames (e.g. to reach a late-game state). The persona target must accept those policies' actions; if your
+policies send `{policy: "<name>"}` for an engine-side bot, the persona target has to handle that too.
+
 Logged errors: the lab reads the game's stdout/stderr per run. Defaults match C#/Unity exceptions
 (`SomethingException:`) and Godot `ERROR:` / `SCRIPT ERROR:` / `USER ERROR:` lines. Unity needs `-logFile -`
 in `args` to print its log to stdout. Override with `bridge.errorPatterns` / `bridge.ignoreErrors` (regex strings);
@@ -111,3 +123,12 @@ Tolerances live in `.playtest/config.json`:
 "check": { "tolerance": 0.1, "abs": 0,
            "metrics": { "score": { "better": "higher" }, "careful.died": { "max": 0.1 }, "survivedSeconds": { "ignore": true } } }
 ```
+Write this when you set the first baseline, not after the first failure: without `better`, every improvement is
+reported as a regression, and with only a relative tolerance, metrics near zero (idle/random counts) fail on noise.
+Give those an `abs` floor.
+
+A check right after a re-baseline reruns the same seeds, so it only proves the wiring. To test the tolerances, run
+a holdout range: `lab.js check --seed 101` (same runs, different seeds). `lab.js determinism` runs the bots twice
+and compares every row and failure, which is the proof for a clean build that has no failing trace to replay.
+
+Personas: `done` is refused until the persona has recorded at least `personas.minNotes` notes (default 3) in the run.

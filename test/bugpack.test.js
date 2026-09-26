@@ -119,3 +119,20 @@ test('CLI: bots save traces, baseline + check gate the build, replay --expect fi
   assert.ok(report.check.rows.some((r) => r.status === 'regressed'));
   assert.match(fs.readFileSync(path.join(dir, '.playtest', 'runs', 'R3', 'report.md'), 'utf8'), /Regression check/);
 });
+
+test('CLI: determinism passes on a deterministic game; check --seed runs a holdout range', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'playtest-determinism-'));
+  const lab = (...a) => spawnSync(process.execPath, [LAB, '--game', dir, ...a], { encoding: 'utf8' });
+  lab('init', '--name', 'Line');
+  fs.copyFileSync(path.join(FIX, 'line.adapter.mjs'), path.join(dir, '.playtest', 'adapter.mjs'));
+  lab('run', 'new');
+  const d = lab('determinism', '--runs', '15');
+  assert.strictEqual(d.status, 0, d.stdout + d.stderr);
+  assert.match(d.stdout, /deterministic: 45 rows identical/);
+  lab('bots', '--runs', '15');
+  lab('baseline', 'set');
+  const h = lab('check', '--seed', '101', '--json');
+  const c = JSON.parse(h.stdout);
+  assert.strictEqual(c.holdout, true);
+  assert.strictEqual(c.seed, 101);
+});

@@ -70,7 +70,7 @@ function compare(base, cur, rules = {}) {
 const round = (n) => (typeof n === 'number' ? +n.toFixed(Math.abs(n) >= 100 ? 0 : 3) : n);
 
 function renderCheck(c) {
-  const L = [`check vs baseline ${c.baselineRun || '?'}: **${c.status.toUpperCase()}** (${c.regressions} regression(s), ${c.improved} improved)`];
+  const L = [`check vs baseline ${c.baselineRun || '?'}${c.holdout ? ` (holdout seeds from ${c.seed})` : ''}: **${c.status.toUpperCase()}** (${c.regressions} regression(s), ${c.improved} improved)`];
   for (const r of c.rows.filter((x) => x.status !== 'ok')) L.push(`  ${r.status.padEnd(9)} ${r.policy}.${r.metric}  ${r.base !== undefined ? round(r.base) : '-'} → ${r.cur !== undefined ? round(r.cur) : '-'}${r.note ? `  (${r.note})` : ''}`);
   return L.join('\n');
 }

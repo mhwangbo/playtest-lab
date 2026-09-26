@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.2.1 (2026-09-26)
+
+Fixes from the first game a studio built end to end on the Godot bridge.
+
+- **Faster Godot bridge:** no Nagle on either side, and the addon busy-polls while commands keep coming instead of
+  sleeping 1 ms every idle frame. 80 CoinLine runs: 32.6 s → 4.0 s.
+- **No stray frame after reset (Godot):** a ready target gets its reset reply without a frame running, so step 1
+  starts on tick 0. Results of existing Godot baselines shift slightly; re-baseline once.
+- **`bridge.cwd` default:** engine binaries (e.g. `godot` on PATH) now run from the game folder; built players inside
+  the game folder still run from their own folder.
+- **`lab.js determinism`:** runs the bots twice and compares every row and failing seed; exit 1 on any difference.
+- **`lab.js check --seed N`:** check a holdout seed range, since a same-seed check right after a re-baseline passes
+  by construction.
+- **Personas:** `play input key=value --frames N` for real-time games; `play bot <policy> --frames N` to hand
+  control to a bot; screenshots are named per persona and never overwrite each other; `done` requires at least
+  3 recorded notes (`personas.minNotes`).
+- Docs: reset timing, cwd rules, when to write `config.check`, and perception guidance for aiming games.
+
 ## 0.2.0 (2026-09-25)
 
 The bug pack: free, deterministic ways to find bugs and keep them fixed.

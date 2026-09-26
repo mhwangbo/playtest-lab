@@ -127,6 +127,11 @@ class Lab {
 
   /** Validates and records a persona's final verdict. Rubric: forced criticism keeps cheap models from rubber-stamping. */
   personaDone(runId, d) {
+    // Cheap models narrate in chat instead of logging; only recorded notes reach the report.
+    const minNotes = Number((this.config().personas || {}).minNotes ?? 3);
+    const src = `persona:${d.persona || 'unknown'}`;
+    const notes = this.readLines(runId, 'notes.jsonl').filter((n) => n.source === src).length;
+    if (notes < minNotes) throw new Error(`needs at least ${minNotes} recorded notes from ${d.persona || 'this persona'} (has ${notes}); a note only counts once \`note\` printed "noted"`);
     const unsure = (d.unsure || []).map((s) => String(s).trim()).filter(Boolean);
     if (unsure.length < 3) throw new Error('needs unsure: the 3 moments you were most unsure what to do or what had just happened');
     const need = ['clarity10s', 'clarity60s', 'agency', 'tension', 'reward', 'replay'];
@@ -294,7 +299,10 @@ const HELP = `lab.js — Playtest Lab   (global: --game <dir>  --run <RUN>  --js
   replay <trace.json> [--expect fixed|reproduced]
                                         re-run a saved failing run exactly; --expect sets the exit code
   baseline set [--run R3] | show        save that run's bot results as the regression baseline
-  check [--label ..] [--import file]    new run: bots on the baseline's seeds, compare, exit 1 on regression
+  check [--label ..] [--import file] [--seed N]
+                                        new run: bots on the baseline's seeds (or a holdout range from N), compare, exit 1 on regression
+  determinism [--runs 10 --seed 1 --policies ..]
+                                        run the bots twice and compare every row; exit 1 if anything differs
   note add --source persona:casual "text"        free-text feedback (auto-classified)
   issue add --title T --severity P0-P3 --category ${CATEGORIES.join('|')}
             --source persona:x|bot:x [--evidence .. --repro .. --seeds 1,2 --accept "a|b"]
@@ -381,15 +389,29 @@ async function main() {
         res = importLevelBots(JSON.parse(fs.readFileSync(path.resolve(lab.root, o.import), 'utf8')));
         lab.write(path.join('runs', id, 'bots.json'), res);
       } else {
-        res = await lab.runBotsInto(id, { runs: b.opts.runs, seed: b.opts.seed, seconds: b.opts.seconds || undefined, policies: b.opts.policies });
+        // --seed N checks a holdout range: same rules, different seeds, so it tests the tolerances instead of replaying the baseline.
+        res = await lab.runBotsInto(id, { runs: b.opts.runs, seed: o.seed ? Number(o.seed) : b.opts.seed, seconds: b.opts.seconds || undefined, policies: b.opts.policies });
       }
-      const c = { ...compare(b, res, lab.config().check || {}), baselineRun: b.runId, runId: id, created: now() };
+      const c = { ...compare(b, res, lab.config().check || {}), baselineRun: b.runId, runId: id, created: now(), seed: res.opts ? res.opts.seed : null, holdout: !!(o.seed && Number(o.seed) !== b.opts.seed) };
       lab.write(path.join('runs', id, 'check.json'), c);
       lab.buildReport(id);
       if (c.status === 'fail') process.exitCode = 1;
       const text = renderCheck(c);
       lab.studioPost('qa', `${c.status === 'pass' ? '✅' : '❌'} Playtest ${id} ${text}`);
       return out(c, `${text}\nrun ${id}; report: ${lab.p('runs', id, 'report.md')}`);
+    }
+    case 'determinism': {
+      // Same seeds twice; every per-seed row must match. Clean builds have no failing trace to replay, so this is the proof.
+      const id = lab.run(o);
+      const opts = { runs: Number(o.runs) || 10, seed: Number(o.seed) || 1, policies: o.policies ? String(o.policies).split(',') : undefined };
+      // Failing runs (crashes, broken invariants) are not in rows, so compare the findings' seeds too.
+      const rowsOf = async () => { const r = await runBots(await lab.adapter(), opts); return [...r.rows.map((x) => JSON.stringify([x.policy, x.seed, x.finished, x.seconds, x.metrics, x.outcome || null])), ...r.findings.filter((x) => x.seeds).map((x) => JSON.stringify(['finding', x.title, x.seeds]))]; };
+      const a = await rowsOf(); const b2 = await rowsOf();
+      const diff = a.map((x, i) => (x === b2[i] ? null : { first: JSON.parse(x), second: JSON.parse(b2[i] || 'null') })).filter(Boolean);
+      const res = { runs: opts.runs, seed: opts.seed, rows: a.length, identical: !diff.length, diff: diff.slice(0, 5) };
+      lab.write(path.join('runs', id, 'determinism.json'), res);
+      if (diff.length) process.exitCode = 1;
+      return out(res, diff.length ? `NOT deterministic: ${diff.length}/${a.length} rows differ between two passes\n  first: ${JSON.stringify(diff[0].first)}\n  second: ${JSON.stringify(diff[0].second)}` : `deterministic: ${a.length} rows identical across two passes (seeds ${opts.seed}..${opts.seed + opts.runs - 1})`);
     }
     case 'note': {
       const id = lab.run(o); const text = pos.slice(2).join(' ');

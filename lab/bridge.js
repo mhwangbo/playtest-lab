@@ -82,7 +82,8 @@ async function connectWithRetry(port, timeoutMs, proc) {
     try {
       return await new Promise((resolve, reject) => {
         const s = net.connect(port, '127.0.0.1');
-        s.once('connect', () => resolve(s)); s.once('error', reject);
+        // No Nagle: every request is one small line that the game should see at once.
+        s.once('connect', () => { s.setNoDelay(true); resolve(s); }); s.once('error', reject);
       });
     } catch {
       if (Date.now() - start > timeoutMs) throw new Error(`bridge: could not connect to 127.0.0.1:${port} within ${timeoutMs} ms`);
@@ -113,7 +114,11 @@ function createBridgeAdapter(mod, gameRoot) {
       // Bare names ("godot") are looked up on PATH; anything with a separator is relative to the game folder.
       const cmd = path.isAbsolute(cfg.command) || !/[\\/]/.test(cfg.command) ? cfg.command : path.resolve(gameRoot, cfg.command);
       const args = (cfg.args || ['-batchmode', '-nographics', '-playtestPort', '{PORT}']).map((a) => String(a).replace('{PORT}', port));
-      proc = spawn(cmd, args, { cwd: cfg.cwd ? path.resolve(gameRoot, cfg.cwd) : path.dirname(cmd), stdio: ['ignore', 'pipe', 'pipe'], windowsHide: cfg.hideWindow !== false });
+      // Default cwd: a built player inside the game folder runs from its own folder (Unity needs its _Data);
+      // anything else (an engine binary like godot, found on PATH or installed elsewhere) runs from the game root.
+      const inGame = path.isAbsolute(cmd) && !path.relative(path.resolve(gameRoot), cmd).startsWith('..');
+      const cwd = cfg.cwd ? path.resolve(gameRoot, cfg.cwd) : inGame ? path.dirname(cmd) : path.resolve(gameRoot);
+      proc = spawn(cmd, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: cfg.hideWindow !== false });
       const keep = (d) => {
         d = String(d); total += d.length; tail = (tail + d).slice(-4000); buf += d;
         if (buf.length > LOG_KEEP) { bufStart += buf.length - LOG_KEEP; buf = buf.slice(-LOG_KEEP); }

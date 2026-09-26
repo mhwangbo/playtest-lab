@@ -20,6 +20,9 @@ extends Node
 const PROTOCOL := "playtest-bridge/1"
 const TARGET_GROUP := "playtest_target"
 const RESET_FRAME_LIMIT := 1200
+## Idle polls before the bridge starts sleeping 1 ms per frame. While the lab is sending commands the bridge
+## busy-polls, because a sleep on every idle frame added about a millisecond to each round trip.
+const IDLE_POLLS_BEFORE_SLEEP := 2000
 
 var _server: TCPServer = null
 var _peer: StreamPeerTCP = null
@@ -28,6 +31,7 @@ var _frames_left := 0
 var _waiting_reset := false
 var _reset_frames := 0
 var _active := false
+var _idle_polls := 0
 
 
 func _ready() -> void:
@@ -52,6 +56,8 @@ func _process(_delta: float) -> void:
 		return
 	if _peer == null and _server.is_connection_available():
 		_peer = _server.take_connection()
+		if _peer != null:
+			_peer.set_no_delay(true)
 	if _peer == null:
 		return
 	_peer.poll()
@@ -91,9 +97,12 @@ func _process(_delta: float) -> void:
 		_buffer = _buffer.substr(i + 1)
 		if line.is_empty():
 			continue
+		_idle_polls = 0
 		if _handle(line):
 			return
-	OS.delay_msec(1)  # paused and idle: don't spin a core
+	_idle_polls += 1
+	if _idle_polls > IDLE_POLLS_BEFORE_SLEEP:
+		OS.delay_msec(1)  # paused and idle for a while: don't spin a core
 
 
 func _handle(line: String) -> bool:
@@ -112,6 +121,10 @@ func _handle(line: String) -> bool:
 				_send({"ok": false, "error": "no node in group '%s'" % TARGET_GROUP})
 				return false
 			t.call("reset_game", int(msg.get("seed", 0)))
+			# Ready right away: reply without running a frame, so the first step starts on tick 0.
+			if not t.has_method("is_ready") or bool(t.call("is_ready")):
+				_reply_state()
+				return false
 			_waiting_reset = true
 			_reset_frames = 0
 			get_tree().paused = false

@@ -59,6 +59,12 @@ After each change: `$LAB check`. It starts a new run, replays the baseline's see
 fails more often than before or a metric mean moved beyond tolerance (`config.check`, see CONTRACT.md §4).
 Intended changes (a rebalance): mark the metric `better`, widen its tolerance, or re-baseline with Boss's OK.
 Never re-baseline just to make a failing check pass.
+- Set `config.check` with the first baseline: `better` for metrics with a clear direction, an `abs` floor for
+  near-zero counts (idle/random), min/max for design targets. Otherwise improvements and noise fail the gate.
+- An intended change is declared as a list, not prose: `policy.metric: up|down|flat [range]` for every metric of the
+  affected policies. The gate's rows are then diffed against it mechanically.
+- After a re-baseline, the same-seed check only proves wiring. Run `$LAB check --seed 101` (holdout seeds) to test
+  the rules, and `$LAB determinism` to prove same-seed replay on a clean build.
 
 ## 3. Persona prompt
 ```
@@ -109,14 +115,20 @@ Measured on Mothlight: $0.39 vs $1.51 per session (Sonnet + screenshots), half t
 and missed the (verified) onboarding problem the screenshot persona hit. So: live-lite for progression,
 learning curve, balance feel, and replay intent; screenshot personas for first impressions / clarity.
 
-## 3c. Engine personas (Unity builds)
+## 3c. Engine personas (Unity, Godot)
 `$LAB host --port <p>` launches the adapter's `personaBridge` build in a visible window (in-memory save,
 redirected telemetry) and keeps it frozen between turns. Personas act only with
 `node "<SKILL_DIR>/lab/lab.js" play <verb> --port <p> --persona <name>` (look | wait N | tap <label> |
-tapat x y | piece L | drag L --to c,r | out L | shot | note | issue | done). Tell personas: use ONLY `play`
+tapat x y | piece L | drag L --to c,r | out L | input key=value ... --frames N (real-time games) | bot <policy> --frames N |
+shot | note | issue | done). Tell personas: use ONLY `play`
 commands — never other lab.js commands (a persona once ran `init` on the user's real project).
 The game's perception must mirror every visible guidance cue (names shown in UI, selection, hint targets);
 when a persona is stuck, read its sessions.jsonl before trusting the finding.
+Directions: don't describe positions only in coarse units (clock hours) when the player aims with something about
+that wide; add cues relative to the aim ("just left of the beam edge"), or aiming by text is impossible.
+`done` needs at least 3 recorded notes; judge only from sessions.jsonl + notes, never the persona's final reply.
+For a "does a new player learn rule X" question, run 2 personas (or a stronger model) and at least a minute per
+session; one cheap persona dying at 20 s is low confidence, so hand it to a human playtest.
 
 ## 4. Rules
 - Bots/personas report; they never edit game files. Fixes belong to the game's team.

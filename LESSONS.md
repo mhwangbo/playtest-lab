@@ -39,3 +39,9 @@ Format: date · symptom · cause · fix · status (NEW / FOLDED into <file>).
 - cause: the last lines of a Unity or Godot crash dump are OS frames and symbol-lookup errors
 - fix: keep the reason lines and the game's own frames (Mono JIT, `res://`, `.cs`/`.gd` lines) from the recent output; identify an engine crash by "the process died", not by its dump text, so replays still match
 - status: FOLDED into lab/bridge.js + lab/bots.js (0.2.0)
+
+### 2026-09-25 · first studio game on the Godot bridge (NIGHTBEAM) — feedback from the engine programmer
+- symptom: (1) 120 bridge runs of a 180 s night took ~226 s, so a per-ticket check costs ~4 min; (2) a clean build has no failing trace, so "same seed replays identically" cannot be shown with replay; (3) the bridge runs one unpaused frame after reset (to poll is_ready), which added a stray tick to a target that steps in _physics_process; (4) bridge.cwd defaults to the binary folder, so Godot adapters must set cwd: '.'
+- cause: one TCP round trip per decision + 1 ms idle sleep; replay only covers failing runs; reset/is_ready behaviour and cwd default undocumented
+- fix: no Nagle + busy-poll in the Godot addon (8x faster), `lab.js determinism`, Godot replies to reset without a frame when ready (documented in CONTRACT §1b), cwd defaults to the game folder for engine binaries
+- status: FOLDED into lab/bridge.js, engines/godot, lab/lab.js, CONTRACT.md (0.2.1)

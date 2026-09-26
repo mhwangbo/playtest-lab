@@ -9,6 +9,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { createBridgeAdapter } = require('./bridge.js');
+const { mulberry32 } = require('./bots.js');
 
 function formatObs(obs) {
   if (!obs || typeof obs !== 'object') return String(obs);
@@ -50,12 +51,30 @@ async function host({ lab, runId, port, record }) {
           return reply(200, { ok: true, turn, text });
         }
         if (url === '/shot') {
-          const file = path.join(runDir, 'shots', `${String(++shot).padStart(3, '0')}.png`);
+          // Name by persona and never reuse a number: several hosts (one per persona) can share a run,
+          // and a restarted host must not overwrite earlier evidence.
+          const who = String(body.persona || 'shot').replace(/[^\w-]+/g, '_');
+          let file;
+          do file = path.join(runDir, 'shots', `${who}-${String(++shot).padStart(3, '0')}.png`); while (fs.existsSync(file));
           const r = await game.request({ cmd: 'screenshot', path: file, scale: body.scale || 0.5 }, 30000);
           return reply(200, { ok: true, path: r.path });
         }
         const rec = url.match(/^\/record\/(note|issue|done)$/);
         if (rec) return reply(200, { ok: true, saved: record(rec[1], body) });
+        if (url === '/bot') {
+          // Hand control to one of the adapter's bot policies for a while (e.g. to reach a late-game state).
+          const all = Object.assign({ idle: game.idleAction, random: game.randomAction }, game.policies || {});
+          const policy = all[body.policy];
+          if (!policy) throw new Error(`unknown policy "${body.policy}"; available: ${Object.keys(all).filter((k) => all[k]).join(', ')}`);
+          const every = Math.max(1, (mod.meta && mod.meta.decisionEvery) || 6);
+          const rng = mulberry32(Number(body.seed) || 1); const memo = {};
+          let left = Math.max(1, Math.min(Number(body.frames) || 600, 36000));
+          while (left > 0 && !sim.done) { const n = Math.min(every, left); await game.stepMany(sim, await policy(sim.obs, rng, memo, sim), n); left -= n; }
+          turn++;
+          const text = formatObs(sim.obs);
+          fs.appendFileSync(logFile, JSON.stringify({ ts: Date.now(), turn, persona: body.persona || '', action: { bot: body.policy }, frames: Number(body.frames) || 600, obs: sim.obs }) + '\n');
+          return reply(200, { ok: true, turn, text });
+        }
         if (url === '/quit') { reply(200, { ok: true }); await game.close(); server.close(); return process.exit(0); }
         reply(404, { ok: false, error: 'unknown endpoint' });
       } catch (e) { reply(200, { ok: false, error: e.message }); }
@@ -85,7 +104,19 @@ async function play(port, pos, o) {
     case 'piece': return act({ tapPiece: pos[2] });
     case 'drag': { const [c, r] = String(o.to || '').split(',').map(Number); return act({ drag: pos[2], to: [c, r] }); }
     case 'out': return act({ dragOut: pos[2] });
-    case 'shot': return `screenshot saved: ${(await call('/shot', { scale: o.scale ? Number(o.scale) : 0.5 })).path}  (open it with the Read tool)`;
+    // Real-time games: hold a game-defined action for --frames (e.g. `play input turn=1 flare=false --frames 30`).
+    case 'input': {
+      const action = {};
+      for (const kv of pos.slice(2)) {
+        const i = kv.indexOf('=');
+        if (i < 1) throw new Error(`input takes key=value pairs, got "${kv}"`);
+        const v = kv.slice(i + 1);
+        action[kv.slice(0, i)] = v === 'true' ? true : v === 'false' ? false : v !== '' && Number.isFinite(Number(v)) ? Number(v) : v;
+      }
+      return act(action);
+    }
+    case 'bot': return (await call('/bot', { policy: pos[2], frames, persona })).text;
+    case 'shot': return `screenshot saved: ${(await call('/shot', { scale: o.scale ? Number(o.scale) : 0.5, persona })).path}  (open it with the Read tool)`;
     case 'note': await call('/record/note', { persona, text: pos.slice(2).join(' ') }); return 'noted';
     case 'issue': { const r = (await call('/record/issue', { persona, title: o.title, severity: o.severity, category: o.category, evidence: o.evidence, repro: o.repro })).saved; return `issue logged [${r.severity}] ${r.title}`; }
     case 'done': {
@@ -95,7 +126,7 @@ async function play(port, pos, o) {
       return `verdict recorded: ${r.rating}/5`;
     }
     case 'quit': await call('/quit'); return 'host stopped';
-    default: throw new Error('play verbs: look | wait <frames> | tap <button label> | tapat <x0..1> <y0..1> | piece <letter> | drag <letter> --to col,row | out <letter> | shot [--scale 0.5] | note "..." | issue --title .. --severity P2 --category clarity --evidence .. | done --rating N --replay yes|no --summary .. --unsure "a|b|c" --scores k=v,... [--noIssues true] | quit');
+    default: throw new Error('play verbs: look | wait <frames> | tap <button label> | tapat <x0..1> <y0..1> | piece <letter> | drag <letter> --to col,row | out <letter> | input key=value ... [--frames N] | bot <policy> [--frames 600] | shot [--scale 0.5] | note "..." | issue --title .. --severity P2 --category clarity --evidence .. | done --rating N --replay yes|no --summary .. --unsure "a|b|c" --scores k=v,... [--noIssues true] | quit');
   }
 }
 
