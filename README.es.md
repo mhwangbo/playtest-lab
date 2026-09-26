@@ -13,7 +13,7 @@ Responde a dos preguntas distintas, con un coste bajo:
 
 | Pregunta | Quién la responde | Coste |
 |---|---|---|
-| **¿Está roto o desequilibrado?** Cuelgues, bloqueos (softlocks), curva de dificultad, gradiente de habilidad, estrategias dominantes | **Bots**: sin interfaz gráfica, deterministas, miles de partidas | gratis (CPU) |
+| **¿Está roto o desequilibrado?** Cuelgues, reglas rotas, errores registrados, bloqueos (softlocks), regresiones, curva de dificultad, gradiente de habilidad | **Bots**: sin interfaz gráfica, deterministas, miles de partidas | gratis (CPU) |
 | **¿Se entiende? ¿Es divertido?** Onboarding, confusión, sensación de juego, "¿volvería a jugar?" | **Personas**: playtesters de IA que juegan la build real, con una rúbrica y crítica obligatoria | unos $0.40–1.30 por sesión |
 
 Ambos escriben en un único informe versionado: `playtest-report.json` más `report.md`. Contiene problemas priorizados, un ticket sugerido para cada problema y tablas por nivel.
@@ -26,6 +26,11 @@ Ambos escriben en un único informe versionado: `playtest-report.json` más `rep
   - Juega tu juego a través de un pequeño **adaptador** sobre muchas semillas, con políticas inactiva (idle), aleatoria y tus propias políticas de habilidad.
   - Agrega métricas como media y p10/p50/p90.
   - Reporta cuelgues y partidas que nunca terminan como problemas P0/P1, y admite tus propias alarmas de balance.
+- **Paquete de detección de bugs** (gratuito y determinista)
+  - **Invariantes:** declara reglas que siempre deben cumplirse (en el adaptador, en el `check_invariants()` de Godot, o en `IPlaytestInvariants` de Unity). Una regla rota detiene la partida y se convierte en un bug.
+  - **Errores registrados:** cuenta las excepciones de Unity, las líneas `ERROR:` de Godot y los `console.error`, incluso cuando el juego sobrevive. Un motor que muere a mitad de partida es un cuelgue P0 con la causa y los propios stack frames del juego.
+  - **Trazas:** cada partida fallida se guarda. `lab.js replay <trace>` la reproduce exactamente, y `--expect fixed` comprueba la corrección.
+  - **Puerta de regresión:** ejecuta `lab.js baseline set` una vez, y luego `lab.js check` después de cada cambio. Devuelve el código 1 cuando los bots fallan más a menudo o una métrica se desvía más allá de su tolerancia.
 - **Puente con el motor** (`playtest-bridge/1`)
   - JSON delimitado por saltos de línea sobre localhost.
   - El juego avanza **solo** cuando el lab pide fotogramas, con un paso de tiempo fijo, así que las partidas son **deterministas por semilla**.
@@ -91,7 +96,7 @@ Luego lanza una persona con el prompt de [SKILL.md §3b](SKILL.md). Escribe un `
    ```
 2. **Bots:** implementa un `IPlaytestTarget` (reiniciar con una semilla, aplicar una acción, observar, terminado, métricas), genera una build de Windows y apunta el adaptador hacia ella:
    ```js
-   export const bridge = { command: 'Builds/Win/MyGame.exe', args: ['-batchmode', '-nographics', '-playtestPort', '{PORT}'] };
+   export const bridge = { command: 'Builds/Win/MyGame.exe', args: ['-batchmode', '-nographics', '-playtestPort', '{PORT}', '-logFile', '-'] };
    ```
    El ejemplo completo es [examples/unity-coinline](examples/unity-coinline): 80 partidas sin interfaz en unos 6 s, de forma determinista.
 3. **Personas:** añade
@@ -109,6 +114,17 @@ Luego lanza una persona con el prompt de [SKILL.md §3b](SKILL.md). Escribe un `
    export const bridge = { command: process.env.GODOT_BIN || 'godot', cwd: '.', args: ['--headless', '--fixed-fps', '60', '--path', '.', '--', '--playtestPort={PORT}'] };
    ```
    El ejemplo completo es [examples/godot-coinline](examples/godot-coinline). Da los mismos resultados que el ejemplo de Unity y es determinista.
+
+### Detectar regresiones (cualquier motor)
+
+```bash
+node lab/lab.js --game path/to/game baseline set      # después de una buena ejecución de bots; haz commit de .playtest/baseline.json
+node lab/lab.js --game path/to/game check             # después de cada cambio: código de salida 0 = igual que la línea base, 1 = regresión
+node lab/lab.js --game path/to/game replay .playtest/runs/R3/traces/careful-s4-crash.json --expect fixed
+```
+
+`check` vuelve a ejecutar las semillas de la línea base, así que cualquier diferencia es un cambio real en el juego. Define tolerancias, o indica
+en qué dirección debería moverse una métrica, en `.playtest/config.json` → `check` ([CONTRACT.md](CONTRACT.md) §4).
 
 ### Bots en el motor (puzles, juegos por turnos, juegos grandes)
 
@@ -146,13 +162,10 @@ Todo esto surgió de ejecuciones reales y está documentado en [LESSONS.md](LESS
 
 - **Modo sin integración:** las personas manejan cualquier juego de escritorio sin modificar mediante capturas de pantalla y ratón y teclado reales (computer-use). Más lento, pero sin ninguna integración.
 - Puente para **Unreal** (subsistema en C++ o Python) y **Android** (emulador o dispositivo vía adb).
-- **Paquete de detección de bugs**, todo gratuito y determinista:
-  - hooks de invariantes
-  - captura del registro de errores del motor
-  - grabación, reproducción y minimización automática de trazas de acciones que fallan
+- **Paquete de detección de bugs, parte 2** (la parte 1 se lanzó en la 0.2: invariantes, errores registrados, trazas y reproducción, `lab check`):
+  - minimización automática de trazas que fallan
   - bots de caos y de novedad
   - informes de cobertura
-  - una puerta de regresión `lab check` contra la última línea base
 - **Informe de métricas de diversión:** gradiente de habilidad, proporción de suerte frente a habilidad, estrategias dominantes, curva de tensión, curva de aprendizaje.
 - **Personas que revisan repeticiones:** aún más baratas; critican fotogramas clave grabados en lugar de jugar en vivo.
 - **Importación de telemetría humana:** calibrar bots y personas con jugadores reales.

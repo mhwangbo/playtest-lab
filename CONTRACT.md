@@ -1,6 +1,6 @@
 # Playtest Lab contracts
 
-Two interfaces. Everything else is internal.
+Two interfaces, plus two files the lab writes for you (traces and the baseline). Everything else is internal.
 
 ## 1. Game adapter (input) — `<game>/.playtest/adapter.mjs`
 
@@ -20,22 +20,39 @@ worked example: `examples/mothlight.adapter.mjs`.
 | `policies` `{name: (obs, rng, memo, sim) => action}` | recommended | scripted skill levels |
 | `actionMenu(obs)` → `[{id, label, action}]` | optional | discrete choices |
 | `findings(policies)` → `[{title, severity, category, evidence}]` | optional | game-specific balance alarms |
+| `invariants(sim)` → `[]` or `[string | {id, message, severity}]` | optional | rules that must always hold, checked at every bot decision |
 
 Rules: seeded and deterministic; DOM-free; no network. If the game has no headless simulation,
 skip bots and run personas only.
+
+What counts as a failing run (each becomes a finding, and the run is saved as a trace):
+
+| Kind | When | Severity |
+|---|---|---|
+| `crash` | the game or adapter threw; for engine games, the process died | P0 |
+| `invariant` | `invariants()` or the engine returned a broken rule (the run stops there) | P1, or the rule's own severity |
+| `error` | the game logged an error but kept going: `console.error` for in-process games, the engine's output for bridge games | P1 |
+| `softlock` | not done after `maxSeconds` | P1 |
 
 ### 1b. Engine games (Unity, Godot; Unreal later) — bridge adapter
 
 If the adapter exports `bridge`, the lab launches the game build and drives it over localhost TCP
 (newline-delimited JSON, protocol `playtest-bridge/1`, spec in `lab/bridge.js`). The adapter then only
-provides `meta`, `bridge`, `idleAction`, `randomAction`, `policies`, `findings` (optionally `actionMenu`);
-`observe`/`step`/`done`/`metrics` come from the engine-side target.
+provides `meta`, `bridge`, `idleAction`, `randomAction`, `policies`, `findings` (optionally `actionMenu`, and
+`invariants(obs)`, which gets the observation); `observe`/`step`/`done`/`metrics` come from the engine-side target.
+Engine-side rules: Godot `check_invariants() -> Array` on the target node, Unity `IPlaytestInvariants`. They arrive
+as an optional `violations` array in reset/step replies.
 
 ```js
 export const bridge = { command: 'Builds/Win/Game.exe', args: ['-batchmode','-nographics','-playtestPort','{PORT}'],
                         port: 0 /* auto */, startupTimeoutMs: 60000, stepTimeoutMs: 30000 };
 ```
 Omit `command` (and set `port`) to attach to an already-running game, e.g. Unity Play Mode.
+
+Logged errors: the lab reads the game's stdout/stderr per run. Defaults match C#/Unity exceptions
+(`SomethingException:`) and Godot `ERROR:` / `SCRIPT ERROR:` / `USER ERROR:` lines. Unity needs `-logFile -`
+in `args` to print its log to stdout. Override with `bridge.errorPatterns` / `bridge.ignoreErrors` (regex strings);
+`bridge.logSettleMs` (default 15) is how long to wait for late output after a run.
 
 | Engine | Engine-side piece | Status |
 |---|---|---|
@@ -62,5 +79,35 @@ Omit `command` (and set `port`) to attach to an already-running game, e.g. Unity
 }
 ```
 
+Additive in 0.2: `check` (`{status: "pass"|"fail", baselineRun, regressions, improved, rows}` when the run came
+from `lab.js check`, else null) and `issues[].traces` (paths of saved failing runs).
+
 Consumers (e.g. game-studio) read `suggestedTicket` to create tickets. Breaking changes bump the
 `contract` version; additive fields do not.
+
+## 3. Trace — `<game>/.playtest/runs/<RUN>/traces/<policy>-s<seed>-<kind>.json`
+
+```jsonc
+{ "trace": "playtest-trace/1", "game": "CoinLine", "policy": "careful", "seed": 4,
+  "dt": 0.0167, "decisionEvery": 6, "maxSteps": 2400,
+  "outcome": { "kind": "crash|invariant|error|softlock", "message": "…", "id": "…", "step": 84 },
+  "actions": [[0, {"move": 1}], [42, {"move": -1}]] }   // [step, action]; only changes are stored
+```
+
+`lab.js replay <trace>` feeds the same actions at the same steps with the same seed, and says whether the same
+failure happens (same kind, and same invariant id or error message, ignoring numbers). `--expect fixed` exits 1
+while it still reproduces, which makes a good acceptance check for the fix ticket.
+
+## 4. Baseline — `<game>/.playtest/baseline.json` (commit it)
+
+`lab.js baseline set` stores the current run's per-policy failure counts and metric means, and the seeds used.
+`lab.js check` reruns the bots on those seeds in a new run, compares, writes `check.json`, and exits 1 on a regression:
+
+- a policy failing more often than before, for any kind, always fails;
+- a metric mean that moved more than the tolerance fails, unless it moved the `better` way.
+
+Tolerances live in `.playtest/config.json`:
+```jsonc
+"check": { "tolerance": 0.1, "abs": 0,
+           "metrics": { "score": { "better": "higher" }, "careful.died": { "max": 0.1 }, "survivedSeconds": { "ignore": true } } }
+```

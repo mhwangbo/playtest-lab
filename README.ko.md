@@ -13,7 +13,7 @@
 
 | 질문 | 누가 답하는가 | 비용 |
 |---|---|---|
-| **망가지지 않았나 / 밸런스는 맞나?** 크래시, 소프트락, 난이도 곡선, 실력 격차(skill gradient), 지배적 전략 | **봇**: 헤드리스, 결정론적, 수천 회 실행 | 무료 (CPU) |
+| **망가지지 않았나 / 밸런스는 맞나?** 크래시, 깨진 규칙, 기록된 에러, 소프트락, 회귀, 난이도 곡선, 실력 격차(skill gradient) | **봇**: 헤드리스, 결정론적, 수천 회 실행 | 무료 (CPU) |
 | **이해하기 쉬운가 / 재미있는가?** 온보딩, 혼란스러운 지점, 손맛, "다시 플레이할 것인가" | **페르소나**: 실제 빌드를 플레이하는 AI 플레이테스터. 평가 기준표(rubric)와 필수 비판 항목이 있음 | 세션당 약 $0.40–1.30 |
 
 두 결과 모두 하나의 버전 관리되는 리포트, 즉 `playtest-report.json`과 `report.md`에 기록됩니다. 리포트에는 우선순위가 매겨진 이슈, 이슈별 추천 티켓, 레벨별 표가 담깁니다.
@@ -26,6 +26,11 @@
   - 작은 **어댑터**를 통해 여러 시드로 게임을 플레이하며, idle·random 정책과 직접 작성한 스킬 정책을 사용합니다.
   - 지표를 평균과 p10/p50/p90으로 집계합니다.
   - 크래시와 끝나지 않는 실행을 P0/P1 이슈로 보고하며, 직접 정의한 밸런스 경보도 지원합니다.
+- **버그 팩** (무료, 결정론적)
+  - **불변식(Invariants):** 항상 성립해야 하는 규칙을 선언합니다(어댑터에서, Godot의 `check_invariants()`, 또는 Unity의 `IPlaytestInvariants`). 규칙이 깨지면 실행이 중단되고 버그로 기록됩니다.
+  - **기록된 에러:** Unity 예외, Godot의 `ERROR:` 라인, `console.error`를 게임이 죽지 않고 살아있어도 집계합니다. 엔진이 실행 중 죽으면 원인과 게임 자체의 스택 프레임이 담긴 P0 크래시가 됩니다.
+  - **트레이스:** 실패한 모든 실행이 저장됩니다. `lab.js replay <trace>`로 정확히 재현할 수 있고, `--expect fixed`로 수정 여부를 확인합니다.
+  - **회귀 게이트:** `lab.js baseline set`을 한 번 실행한 뒤, 변경할 때마다 `lab.js check`를 실행합니다. 봇이 더 자주 실패하거나 지표가 허용 범위를 벗어나면 종료 코드 1을 반환합니다.
 - **엔진 브리지** (`playtest-bridge/1`)
   - localhost 상에서 줄 단위 JSON으로 통신합니다.
   - 게임은 랩이 프레임을 요청할 때**만** 고정 타임스텝으로 진행되므로, 실행 결과가 **시드별로 결정론적**입니다.
@@ -91,7 +96,7 @@ node lab/lab.js --game path/to/game serve --root dist --port 8120
    ```
 2. **봇:** `IPlaytestTarget` 하나를 구현하고(시드로 리셋, 액션 적용, observe, done, metrics), Windows 빌드를 만든 뒤 어댑터가 그 빌드를 가리키게 합니다.
    ```js
-   export const bridge = { command: 'Builds/Win/MyGame.exe', args: ['-batchmode', '-nographics', '-playtestPort', '{PORT}'] };
+   export const bridge = { command: 'Builds/Win/MyGame.exe', args: ['-batchmode', '-nographics', '-playtestPort', '{PORT}', '-logFile', '-'] };
    ```
    실제 동작 예시는 [examples/unity-coinline](examples/unity-coinline)입니다. 헤드리스 80회 실행에 약 6초가 걸리며 결정론적입니다.
 3. **페르소나:** 다음을 추가합니다.
@@ -109,6 +114,17 @@ node lab/lab.js --game path/to/game serve --root dist --port 8120
    export const bridge = { command: process.env.GODOT_BIN || 'godot', cwd: '.', args: ['--headless', '--fixed-fps', '60', '--path', '.', '--', '--playtestPort={PORT}'] };
    ```
    실제 동작 예시는 [examples/godot-coinline](examples/godot-coinline)입니다. Unity 샘플과 동일한 결과를 내며 결정론적입니다.
+
+### 회귀 감지 (모든 엔진)
+
+```bash
+node lab/lab.js --game path/to/game baseline set      # 정상적인 봇 실행 후; .playtest/baseline.json을 커밋하세요
+node lab/lab.js --game path/to/game check             # 변경할 때마다: 종료 코드 0 = 기준선과 동일, 1 = 회귀
+node lab/lab.js --game path/to/game replay .playtest/runs/R3/traces/careful-s4-crash.json --expect fixed
+```
+
+`check`는 기준선의 시드를 다시 실행하므로, 차이가 있다면 그건 게임에서 실제로 바뀐 부분입니다. 허용 오차를 설정하거나
+어느 방향으로 지표가 움직여야 하는지는 `.playtest/config.json` → `check`에서 지정하세요 ([CONTRACT.md](CONTRACT.md) §4).
 
 ### 엔진 측 봇 (퍼즐, 턴제, 대형 게임)
 
@@ -146,13 +162,10 @@ node lab/lab.js --game . bots --import .playtest/my_bots.json
 
 - **무연동 모드:** 페르소나가 스크린샷과 실제 마우스·키보드(computer-use)로 수정되지 않은 어떤 데스크톱 게임이든 조작합니다. 느리지만 연동 작업이 전혀 필요 없습니다.
 - **Unreal** 브리지(C++ 서브시스템 또는 Python), 그리고 **Android**(adb를 통한 에뮬레이터 또는 실기기).
-- **버그 팩** — 모두 무료이며 결정론적:
-  - 불변식(invariant) 훅
-  - 엔진 에러 로그 수집
-  - 실패한 액션 트레이스의 기록, 리플레이, 자동 최소화
+- **버그 팩, 2부** (1부는 0.2에서 출시: 불변식, 기록된 에러, 트레이스와 리플레이, `lab check`):
+  - 실패한 트레이스의 자동 최소화
   - 카오스 봇과 새로움 탐색(novelty) 봇
   - 커버리지 리포트
-  - 직전 기준선과 비교하는 `lab check` 회귀 게이트
 - **재미 지표 리포트:** 실력 격차, 운 대 실력 비중, 지배적 전략, 긴장감 곡선, 학습 곡선.
 - **리플레이 리뷰 페르소나:** 라이브로 플레이하는 대신 녹화된 키프레임을 비평하므로 더욱 저렴합니다.
 - **사람 텔레메트리 import:** 봇과 페르소나를 실제 플레이어 데이터에 맞춰 보정합니다.

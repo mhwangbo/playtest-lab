@@ -3,14 +3,16 @@
  * lab.js — Playtest Lab CLI (zero dependencies, Node 18+).
  * Per-game state lives in <game>/.playtest/ :
  *   config.json            game name, build url/path, adapter path, integrations
- *   runs/<RUN>/            bots.json, notes.jsonl, issues.jsonl, personas.jsonl, playtest-report.json, report.md
+ *   baseline.json          bot aggregates that `check` compares against (commit it with the game)
+ *   runs/<RUN>/            bots.json, notes.jsonl, issues.jsonl, personas.jsonl, check.json, traces/, playtest-report.json, report.md
  * Run `node lab.js help`.
  */
 'use strict';
 const fs = require('fs');
 const path = require('path');
 const { pathToFileURL } = require('url');
-const { runBots } = require('./bots.js');
+const { runBots, replayTrace } = require('./bots.js');
+const { makeBaseline, compare, renderCheck } = require('./check.js');
 const { classifyText } = require('./classify.js');
 
 const LAB_DIR = path.resolve(__dirname, '..');
@@ -84,6 +86,22 @@ class Lab {
     // Engine games (Unity/Godot/Unreal): adapter exports `bridge` config → out-of-process adapter.
     if (mod.bridge) return require('./bridge.js').createBridgeAdapter(mod, this.root);
     return mod;
+  }
+
+  /** Runs the adapter's bots into a run: bots.json, failing-run traces, findings → issues. */
+  async runBotsInto(runId, opts) {
+    const adapter = await this.adapter();
+    const traceDir = this.p('runs', runId, 'traces');
+    const saveTrace = (t) => {
+      fs.mkdirSync(traceDir, { recursive: true });
+      const file = path.join(traceDir, `${t.policy}-s${t.seed}-${t.outcome.kind}.json`.replace(/[^\w.-]+/g, '_'));
+      fs.writeFileSync(file, JSON.stringify(t));
+      return path.relative(this.root, file).split(path.sep).join('/');
+    };
+    const res = await runBots(adapter, { ...opts, saveTrace });
+    this.write(path.join('runs', runId, 'bots.json'), res);
+    for (const f of res.findings) this.append(runId, 'issues.jsonl', { ts: now(), ...f });
+    return res;
   }
 
   /**
@@ -161,15 +179,17 @@ class Lab {
     const notes = this.readLines(runId, 'notes.jsonl');
     const personas = this.readLines(runId, 'personas.jsonl');
     const issues = this.readLines(runId, 'issues.jsonl').sort((a, b) => a.severity.localeCompare(b.severity));
+    const check = this.read(path.join('runs', runId, 'check.json'), null);
     const teamOf = { bug: 'engineering', crash: 'engineering', softlock: 'engineering', perf: 'engineering', balance: 'design', clarity: 'design', feel: 'design', ux: 'engineering', accessibility: 'engineering', audio: 'audio', other: 'design' };
     const report = {
       contract: CONTRACT, game: c.name, build: run.build || c.build, runId, created: now(), label: run.label || '',
       bots: bots ? { runsPerPolicy: bots.runsPerPolicy, seconds: bots.seconds, policies: bots.policies, levels: bots.levels } : null,
+      check: check ? { status: check.status, baselineRun: check.baselineRun, regressions: check.regressions, improved: check.improved, rows: check.rows.filter((r) => r.status !== 'ok') } : null,
       personas: personas.map((p) => ({ name: p.persona, rating: p.rating, summary: p.summary, wouldReplay: p.wouldReplay, scores: p.scores || {}, unsure: p.unsure || [] })),
       notes: notes.map((n) => ({ source: n.source, text: n.text, category: n.category, sentiment: n.sentiment })),
       issues: issues.map((i, k) => ({
         id: `${runId}-I${k + 1}`, title: i.title, severity: i.severity, category: i.category, source: i.source,
-        evidence: i.evidence || '', repro: i.repro || '', seeds: i.seeds || [],
+        evidence: i.evidence || '', repro: i.repro || '', seeds: i.seeds || [], ...(i.traces ? { traces: i.traces } : {}),
         // Persona reports can be artifacts of how an agent drives the UI; bot findings are reproducible by seed.
         verified: !!i.verified || String(i.source).startsWith('bot:'),
         suggestedTicket: {
@@ -209,6 +229,16 @@ function importLevelBots(ext) {
   return { runsPerPolicy: ext.seedsPerPolicy, seconds: null, source: ext.source, policies, levels: ext.levels, rows: [], findings: [] };
 }
 
+function botLines(res) {
+  const lines = [`bots done (${res.runsPerPolicy} runs × ${Object.keys(res.policies).length} policies, ${res.ms} ms)`];
+  for (const [name, p] of Object.entries(res.policies)) {
+    const kinds = Object.entries(p.failureKinds || {}).filter(([, n]) => n).map(([k, n]) => `${k} ${n}`).join(', ');
+    lines.push(`  ${name.padEnd(14)} ${Object.entries(p.metrics).map(([k, v]) => `${k} ${fmt(v && v.mean)}`).join('  ')}  failures ${p.failures}${kinds ? ` (${kinds})` : ''}`);
+  }
+  if (res.findings.length) lines.push(`  findings → issues: ${res.findings.map((f) => `[${f.severity}] ${f.title}`).join('; ')}`);
+  return lines;
+}
+
 function fmt(n) { return typeof n === 'number' ? (Math.abs(n) >= 100 ? n.toFixed(0) : n.toFixed(2)) : String(n); }
 function renderMd(r) {
   const L = [`# Playtest report — ${r.game} (${r.runId})`, '', `Build: ${r.build || '-'}  ·  verdict: **${r.summary.verdict}**  ·  issues P0 ${r.summary.issues.P0} / P1 ${r.summary.issues.P1} / P2 ${r.summary.issues.P2} / P3 ${r.summary.issues.P3}${r.summary.personaRating ? `  ·  persona rating ${r.summary.personaRating}/5` : ''}`, ''];
@@ -217,6 +247,12 @@ function renderMd(r) {
     const metrics = [...new Set(Object.values(r.bots.policies).flatMap((p) => Object.keys(p.metrics)))];
     L.push(`| policy | ${metrics.join(' | ')} | failures |`, `|---|${metrics.map(() => '---').join('|')}|---|`);
     for (const [name, p] of Object.entries(r.bots.policies)) L.push(`| ${name} | ${metrics.map((m) => (p.metrics[m] ? `${fmt(p.metrics[m].mean)} (p10 ${fmt(p.metrics[m].p10)}–p90 ${fmt(p.metrics[m].p90)})` : '-')).join(' | ')} | ${p.failures} |`);
+    L.push('');
+  }
+  if (r.check) {
+    L.push(`## Regression check (vs ${r.check.baselineRun}): ${r.check.status.toUpperCase()}`, '');
+    if (!r.check.rows.length) L.push('- no changes beyond tolerance');
+    for (const x of r.check.rows) L.push(`- ${x.status}: ${x.policy}.${x.metric} ${x.base !== undefined ? fmt(x.base) : '-'} → ${x.cur !== undefined ? fmt(x.cur) : '-'}${x.note ? ` (${x.note})` : ''}`);
     L.push('');
   }
   if (r.bots && r.bots.levels) {
@@ -254,6 +290,11 @@ const HELP = `lab.js — Playtest Lab   (global: --game <dir>  --run <RUN>  --js
   status                                current run summary
   bots [--runs 30 --policies idle,random,<adapter policies> --seed 1 --seconds <max>]
                                         headless bot runs via the game adapter → bots.json
+                                        failing runs are saved as traces in runs/<RUN>/traces/
+  replay <trace.json> [--expect fixed|reproduced]
+                                        re-run a saved failing run exactly; --expect sets the exit code
+  baseline set [--run R3] | show        save that run's bot results as the regression baseline
+  check [--label ..] [--import file]    new run: bots on the baseline's seeds, compare, exit 1 on regression
   note add --source persona:casual "text"        free-text feedback (auto-classified)
   issue add --title T --severity P0-P3 --category ${CATEGORIES.join('|')}
             --source persona:x|bot:x [--evidence .. --repro .. --seeds 1,2 --accept "a|b"]
@@ -302,18 +343,53 @@ async function main() {
         lab.studioPost('qa', `🤖 ${lines.join('\n')}`);
         return out(res, lines.join('\n'));
       }
-      const adapter = await lab.adapter();
-      const res = await runBots(adapter, {
+      const res = await lab.runBotsInto(id, {
         runs: Number(o.runs) || 30, seed: Number(o.seed) || 1, seconds: o.seconds ? Number(o.seconds) : undefined,
         policies: o.policies ? String(o.policies).split(',') : undefined,
       });
-      lab.write(path.join('runs', id, 'bots.json'), res);
-      for (const f of res.findings) lab.append(id, 'issues.jsonl', { ts: now(), ...f });
-      const lines = [`bots done (${res.runsPerPolicy} runs × ${Object.keys(res.policies).length} policies, ${res.ms} ms)`];
-      for (const [name, p] of Object.entries(res.policies)) lines.push(`  ${name.padEnd(14)} ${Object.entries(p.metrics).map(([k, v]) => `${k} ${fmt(v.mean)}`).join('  ')}  failures ${p.failures}`);
-      if (res.findings.length) lines.push(`  findings → issues: ${res.findings.map((f) => `[${f.severity}] ${f.title}`).join('; ')}`);
+      const lines = botLines(res);
       lab.studioPost('qa', `🤖 ${lines.join('\n')}`);
       return out(res, lines.join('\n'));
+    }
+    case 'replay': {
+      if (!pos[1]) throw new Error('usage: replay <trace.json> [--expect fixed|reproduced]');
+      const trace = JSON.parse(fs.readFileSync(path.resolve(lab.root, pos[1]), 'utf8'));
+      const r = await replayTrace(await lab.adapter(), trace);
+      const want = o.expect === 'fixed' ? false : o.expect === 'reproduced' ? true : null;
+      if (want !== null && r.reproduced !== want) process.exitCode = 1;
+      const got = r.outcome ? `${r.outcome.kind}: ${r.outcome.message}` : 'no failure';
+      return out(r, `${r.reproduced ? 'REPRODUCED' : 'NOT reproduced'}: expected ${trace.outcome.kind}: ${trace.outcome.message}\n  got ${got} (step ${r.steps}, ${r.seconds}s)${want === null ? '' : `\n  --expect ${o.expect}: ${process.exitCode ? 'FAIL' : 'pass'}`}`);
+    }
+    case 'baseline': {
+      if (pos[1] === 'show') {
+        const b = lab.read('baseline.json', null);
+        if (!b) throw new Error('no baseline yet — `lab.js baseline set`');
+        return out(b, `baseline from ${b.runId} (${new Date(b.created).toISOString()}), ${b.opts.runs} runs from seed ${b.opts.seed}, policies ${Object.keys(b.policies).join(', ')}`);
+      }
+      if (pos[1] !== 'set') throw new Error('usage: baseline set [--run R3] | baseline show');
+      const id = lab.run(o);
+      const b = makeBaseline(lab.read(path.join('runs', id, 'bots.json'), null), id);
+      lab.write('baseline.json', b);
+      return out(b, `baseline set from ${id}: ${Object.keys(b.policies).join(', ')} (${b.opts.runs} runs from seed ${b.opts.seed}) → ${lab.p('baseline.json')}`);
+    }
+    case 'check': {
+      const b = lab.read('baseline.json', null);
+      if (!b) throw new Error('no baseline yet — run bots on a good build, then `lab.js baseline set`');
+      const id = lab.newRun(o.label || `check vs ${b.runId}`);
+      let res;
+      if (o.import) {
+        res = importLevelBots(JSON.parse(fs.readFileSync(path.resolve(lab.root, o.import), 'utf8')));
+        lab.write(path.join('runs', id, 'bots.json'), res);
+      } else {
+        res = await lab.runBotsInto(id, { runs: b.opts.runs, seed: b.opts.seed, seconds: b.opts.seconds || undefined, policies: b.opts.policies });
+      }
+      const c = { ...compare(b, res, lab.config().check || {}), baselineRun: b.runId, runId: id, created: now() };
+      lab.write(path.join('runs', id, 'check.json'), c);
+      lab.buildReport(id);
+      if (c.status === 'fail') process.exitCode = 1;
+      const text = renderCheck(c);
+      lab.studioPost('qa', `${c.status === 'pass' ? '✅' : '❌'} Playtest ${id} ${text}`);
+      return out(c, `${text}\nrun ${id}; report: ${lab.p('runs', id, 'report.md')}`);
     }
     case 'note': {
       const id = lab.run(o); const text = pos.slice(2).join(' ');

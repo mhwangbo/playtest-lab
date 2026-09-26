@@ -32,17 +32,26 @@ public sealed class MyGamePlaytest : MonoBehaviour, IPlaytestTarget
 
 The target should feed actions into your input layer, not move objects directly. That way bots exercise the same code players do.
 
+Optionally, also implement `IPlaytestInvariants` to declare rules that must always hold. The bridge checks them after
+every reset and step; a broken rule stops the bot run and becomes a bug with a replayable trace:
+
+```csharp
+public string InvariantsJson() => _hp < 0 ? "[{\"id\":\"hp-non-negative\",\"message\":\"hp is " + _hp + "\"}]" : "[]";
+```
+
 ## 3. Build and point the lab at it
 
 Make a Windows standalone build. It can run headless with `-batchmode -nographics`. Then in `<game>/.playtest/adapter.mjs`:
 
 ```js
 export const meta = { name: 'MyGame', dt: 1 / 60, decisionEvery: 6, maxSeconds: 120 };
-export const bridge = { command: 'Builds/Win/MyGame.exe', args: ['-batchmode', '-nographics', '-playtestPort', '{PORT}'] };
+export const bridge = { command: 'Builds/Win/MyGame.exe', args: ['-batchmode', '-nographics', '-playtestPort', '{PORT}', '-logFile', '-'] };
 export const policies = { greedy: (obs) => ({ move: Math.sign(obs.target - obs.x) }) };
 export const idleAction = () => ({});
 export const randomAction = (obs, rng) => ({ move: rng.pick([-1, 0, 1]) });
 ```
+
+`-logFile -` sends the player log to stdout, so exceptions the game logs (and survives) become findings too.
 
 Leave out `command` to attach to Play Mode instead: choose **Tools → Playtest Lab → Enable Bridge In Play Mode** and set `bridge.port: 7777`.
 

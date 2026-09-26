@@ -69,6 +69,16 @@ func is_ready() -> bool:
 	return true
 
 
+## Rules that must always hold; the Playtest Lab bridge reports any broken one as a bug with a replayable trace.
+func check_invariants() -> Array:
+	var broken: Array = []
+	if _x < 0.0 or _x > LINE_LENGTH:
+		broken.append({"id": "player-on-line", "message": "player x %.2f is off the line" % _x})
+	if _coin < 0.0 or _coin > LINE_LENGTH:
+		broken.append({"id": "coin-on-line", "message": "coin at %.2f is off the line" % _coin})
+	return broken
+
+
 func metrics() -> Dictionary:
 	return {"score": _score, "died": 1 if _died else 0, "survivedSeconds": _elapsed}
 

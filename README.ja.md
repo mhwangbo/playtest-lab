@@ -13,7 +13,7 @@
 
 | 問い | 誰が答えるか | コスト |
 |---|---|---|
-| **壊れていないか / バランスは取れているか？** クラッシュ、ソフトロック、難易度カーブ、スキル勾配、支配的戦略 | **ボット**：ヘッドレス、決定論的、数千回の実行 | 無料（CPU） |
+| **壊れていないか / バランスは取れているか？** クラッシュ、壊れたルール、記録されたエラー、ソフトロック、リグレッション、難易度カーブ、スキル勾配 | **ボット**：ヘッドレス、決定論的、数千回の実行 | 無料（CPU） |
 | **分かりやすいか / 面白いか？** オンボーディング、混乱、手触り、「もう一度遊びたいか」 | **ペルソナ**：実際のビルドをプレイする AI プレイテスター。評価基準（ルーブリック）と批判の記述が必須 | 1 セッションあたり約 $0.40–1.30 |
 
 どちらの結果も、バージョン管理された 1 つのレポート（`playtest-report.json` と `report.md`）に書き込まれます。レポートには優先度付きの問題、問題ごとの推奨チケット、レベル別の表が含まれます。
@@ -26,6 +26,11 @@
   - 小さな **アダプター** を介して、多数のシードでゲームをプレイします。放置（idle）、ランダム、そして独自のスキルポリシーを使用できます。
   - メトリクスを平均値と p10/p50/p90 で集計します。
   - クラッシュや終わらない実行を P0/P1 の問題として報告し、独自のバランスアラームにも対応します。
+- **バグパック**（無料、決定論的）
+  - **不変条件（Invariants）：** 常に成り立つべきルールを宣言します（アダプター内、Godot の `check_invariants()`、または Unity の `IPlaytestInvariants`）。ルールが破られると実行は停止し、バグとして記録されます。
+  - **記録されたエラー：** Unity の例外、Godot の `ERROR:` 行、`console.error` をカウントします。ゲームがそれで落ちない場合も対象です。エンジンが実行中に落ちた場合は、原因とゲーム自身のスタックフレームを伴う P0 クラッシュになります。
+  - **トレース：** 失敗したすべての実行が保存されます。`lab.js replay <trace>` で正確に再現でき、`--expect fixed` で修正を確認できます。
+  - **リグレッションゲート：** 最初に `lab.js baseline set` を一度実行し、変更ごとに `lab.js check` を実行します。ボットの失敗率が上がるか、メトリクスが許容範囲を超えて変化すると終了コード 1 を返します。
 - **エンジンブリッジ**（`playtest-bridge/1`）
   - localhost 上の改行区切り JSON です。
   - ゲームはラボがフレームを要求したときに **のみ**、固定タイムステップで進行するため、実行は **シードごとに決定論的** です。
@@ -91,7 +96,7 @@ node lab/lab.js --game path/to/game serve --root dist --port 8120
    ```
 2. **ボット：** `IPlaytestTarget` を 1 つ実装し（シードでのリセット、アクションの適用、observe、done、metrics）、Windows ビルドを作成して、アダプターからそれを指定します。
    ```js
-   export const bridge = { command: 'Builds/Win/MyGame.exe', args: ['-batchmode', '-nographics', '-playtestPort', '{PORT}'] };
+   export const bridge = { command: 'Builds/Win/MyGame.exe', args: ['-batchmode', '-nographics', '-playtestPort', '{PORT}', '-logFile', '-'] };
    ```
    実例は [examples/unity-coinline](examples/unity-coinline) です。ヘッドレスで 80 回の実行が約 6 秒で完了し、結果は決定論的です。
 3. **ペルソナ：** 次を追加します。
@@ -109,6 +114,17 @@ node lab/lab.js --game path/to/game serve --root dist --port 8120
    export const bridge = { command: process.env.GODOT_BIN || 'godot', cwd: '.', args: ['--headless', '--fixed-fps', '60', '--path', '.', '--', '--playtestPort={PORT}'] };
    ```
    実例は [examples/godot-coinline](examples/godot-coinline) です。Unity のサンプルと同じ結果が得られ、決定論的です。
+
+### リグレッションの検出（どのエンジンでも）
+
+```bash
+node lab/lab.js --game path/to/game baseline set      # 良好なボット実行の後に; .playtest/baseline.json をコミットする
+node lab/lab.js --game path/to/game check             # 変更ごとに: 終了コード 0 = ベースラインと同じ、1 = リグレッション
+node lab/lab.js --game path/to/game replay .playtest/runs/R3/traces/careful-s4-crash.json --expect fixed
+```
+
+`check` はベースラインのシードを再実行するため、差異があればそれはゲームの実際の変化です。許容誤差の設定や、
+メトリクスがどちら方向に動くべきかの指定は `.playtest/config.json` → `check` で行います（[CONTRACT.md](CONTRACT.md) §4）。
 
 ### エンジン側ボット（パズル、ターン制、大規模ゲーム）
 
@@ -146,13 +162,10 @@ node lab/lab.js --game . bots --import .playtest/my_bots.json
 
 - **連携不要モード：** ペルソナがスクリーンショットと実際のマウス・キーボード操作（computer-use）で、改変していない任意のデスクトップゲームを操作します。低速ですが、連携作業はゼロです。
 - **Unreal** ブリッジ（C++ サブシステムまたは Python）、および **Android**（adb 経由でエミュレーターまたは実機）。
-- **バグパック**（すべて無料かつ決定論的）：
-  - 不変条件フック
-  - エンジンのエラーログ取得
-  - 失敗したアクショントレースの記録、リプレイ、自動最小化
+- **バグパック 第2部**（第1部は 0.2 で提供済み：不変条件、記録されたエラー、トレースとリプレイ、`lab check`）：
+  - 失敗したトレースの自動最小化
   - カオスボットとノベルティボット
   - カバレッジレポート
-  - 直近のベースラインに対する `lab check` 回帰ゲート
 - **面白さメトリクスレポート：** スキル勾配、運と実力の比率、支配的戦略、緊張感カーブ、学習曲線。
 - **リプレイレビュー型ペルソナ：** ライブでプレイする代わりに記録されたキーフレームを批評するため、さらに低コストです。
 - **人間のテレメトリのインポート：** ボットとペルソナを実プレイヤーに合わせて調整します。

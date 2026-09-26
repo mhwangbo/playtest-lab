@@ -13,7 +13,7 @@
 
 | 问题 | 由谁回答 | 成本 |
 |---|---|---|
-| **游戏有没有坏 / 平衡吗？** 崩溃、软锁、难度曲线、技巧梯度、压倒性策略 | **机器人**：无头运行、结果确定、可跑数千局 | 免费（仅耗 CPU） |
+| **游戏有没有坏 / 平衡吗？** 崩溃、规则破坏、记录的错误、软锁、回归、难度曲线、技巧梯度 | **机器人**：无头运行、结果确定、可跑数千局 | 免费（仅耗 CPU） |
 | **游戏好懂 / 好玩吗？** 新手引导、困惑点、手感、"我还会再玩吗" | **人设**：AI 试玩员游玩真实构建，按评分标准打分，并且必须提出批评 | 每次约 $0.40–1.30 |
 
 两者的结果都写入同一份带版本号的报告：`playtest-report.json` 加 `report.md`。报告包含按优先级排列的问题、每个问题对应的建议工单，以及按关卡划分的表格。
@@ -26,6 +26,11 @@
   - 通过一个轻量的**适配器**在大量种子上游玩你的游戏，支持空闲、随机以及你自定义的技巧策略。
   - 以均值和 p10/p50/p90 汇总各项指标。
   - 将崩溃和永不结束的对局报告为 P0/P1 问题，并支持你自定义的平衡性告警。
+- **缺陷包**（免费且结果确定）
+  - **不变量（Invariants）：** 声明必须始终成立的规则（在适配器中，或 Godot 的 `check_invariants()`，或 Unity 的 `IPlaytestInvariants`）。规则被打破时会终止运行，并记为一个缺陷。
+  - **记录的错误：** 统计 Unity 异常、Godot 的 `ERROR:` 行和 `console.error`，即使游戏仍能继续运行也会计入。如果引擎在运行中途崩溃，则记为一个 P0 崩溃，并附带原因和游戏自身的堆栈帧。
+  - **轨迹：** 每一次失败的运行都会被保存。`lab.js replay <trace>` 可以精确复现，`--expect fixed` 用于验证修复是否生效。
+  - **回归关卡：** 先运行一次 `lab.js baseline set`，之后每次改动后运行 `lab.js check`。当机器人失败率上升，或某个指标超出容差时，退出码为 1。
 - **引擎桥接**（`playtest-bridge/1`）
   - 基于 localhost 的换行分隔 JSON。
   - 游戏**只在** lab 请求帧时才以固定时间步推进，因此每个种子的运行结果都是**确定的**。
@@ -91,7 +96,7 @@ node lab/lab.js --game path/to/game serve --root dist --port 8120
    ```
 2. **机器人：** 实现一个 `IPlaytestTarget`（用种子重置、执行动作、观察、判断结束、输出指标），打一个 Windows 包，并让适配器指向它：
    ```js
-   export const bridge = { command: 'Builds/Win/MyGame.exe', args: ['-batchmode', '-nographics', '-playtestPort', '{PORT}'] };
+   export const bridge = { command: 'Builds/Win/MyGame.exe', args: ['-batchmode', '-nographics', '-playtestPort', '{PORT}', '-logFile', '-'] };
    ```
    完整示例见 [examples/unity-coinline](examples/unity-coinline)：80 次无头运行约 6 秒完成，结果确定。
 3. **人设：** 添加
@@ -109,6 +114,17 @@ node lab/lab.js --game path/to/game serve --root dist --port 8120
    export const bridge = { command: process.env.GODOT_BIN || 'godot', cwd: '.', args: ['--headless', '--fixed-fps', '60', '--path', '.', '--', '--playtestPort={PORT}'] };
    ```
    完整示例见 [examples/godot-coinline](examples/godot-coinline)。它与 Unity 示例的结果完全一致，且结果确定。
+
+### 捕获回归（适用于任何引擎）
+
+```bash
+node lab/lab.js --game path/to/game baseline set      # 在一次良好的机器人运行之后执行；提交 .playtest/baseline.json
+node lab/lab.js --game path/to/game check             # 每次改动之后执行：退出码 0 = 与基线一致，1 = 出现回归
+node lab/lab.js --game path/to/game replay .playtest/runs/R3/traces/careful-s4-crash.json --expect fixed
+```
+
+`check` 会重新运行基线的种子，因此任何差异都意味着游戏本身发生了真实的变化。可以在 `.playtest/config.json` → `check`
+中设置容差，或指定某个指标应该朝哪个方向变化（见 [CONTRACT.md](CONTRACT.md) §4）。
 
 ### 引擎内机器人（解谜、回合制、大型游戏）
 
@@ -146,13 +162,10 @@ node lab/lab.js --game . bots --import .playtest/my_bots.json
 
 - **免集成模式：** 人设通过截图和真实的鼠标键盘（computer-use）操作任何未经修改的桌面游戏。速度较慢，但完全无需集成。
 - **Unreal** 桥接（C++ 子系统或 Python），以及 **Android**（通过 adb 连接模拟器或真机）。
-- **缺陷检测套件**，全部免费且结果确定：
-  - 不变量钩子
-  - 引擎错误日志捕获
-  - 失败动作轨迹的录制、回放与自动最小化
+- **缺陷包，第二部分**（第一部分已在 0.2 中发布：不变量、记录的错误、轨迹与回放、`lab check`）：
+  - 失败轨迹的自动最小化
   - 混沌机器人与新奇探索机器人
   - 覆盖率报告
-  - 与上一次基线对比的 `lab check` 回归关卡
 - **趣味性指标报告：** 技巧梯度、运气与技巧占比、压倒性策略、紧张度曲线、学习曲线。
 - **回放评审人设：** 成本更低；它们评审录制好的关键帧，而不是实时游玩。
 - **人类遥测数据导入：** 用真实玩家数据校准机器人和人设。

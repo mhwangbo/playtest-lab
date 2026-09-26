@@ -24,7 +24,8 @@ LAB  = node "<SKILL_DIR>/lab/lab.js" --game "<GAME_DIR>"
 1. `$LAB init --build <url-or-path> --name <Game>` → creates `<GAME_DIR>/.playtest/` and a template adapter.
 2. Adapter (`.playtest/adapter.mjs`, see `CONTRACT.md` + `examples/mothlight.adapter.mjs`): only if the
    game has a DOM-free / headless simulation. Implement create/observe/step/done/metrics, idle/random
-   actions, 1-3 scripted skill policies (e.g. competent, sloppy), and `findings()` alarms for the design goals.
+   actions, 1-3 scripted skill policies (e.g. competent, sloppy), `findings()` alarms for the design goals, and
+   `invariants(sim)`: rules that must always hold (hp ≥ 0, player inside the level, score never drops, …).
    No headless sim → skip bots, personas only.
 3. **Engine games** (Unity, Godot 4): add the engine bridge instead of a JS sim.
    - Unity: package `engines/unity/com.playtestlab.bridge` (README inside); implement one `IPlaytestTarget`
@@ -40,7 +41,9 @@ LAB  = node "<SKILL_DIR>/lab/lab.js" --game "<GAME_DIR>"
 ## 2. A playtest run
 1. `$LAB run new --label "<build/milestone>"`.
 2. **Bots** (free, fast): `$LAB bots --runs 30`. Read the table: skill gradient (competent ≫ idle?),
-   variance (p10–p90), failures. Crashes/softlocks/alarms auto-log as issues.
+   variance (p10–p90), failures. Crashes, broken invariants, logged errors, softlocks and alarms auto-log as
+   issues; each failing run is saved as a trace. `$LAB replay <trace>` re-runs it exactly (use it to confirm a
+   bug before reporting it, and `--expect fixed` to confirm the fix).
 3. **Personas** (costs tokens — ask Boss how many; default 2: first-timer + casual-mobile for new games).
    Spawn each as a background Agent with the prompt in §3, in parallel, each on its own browser port/tab.
 4. Persona issues start **UNVERIFIED** (excluded from the verdict and from tickets). For each, reproduce it
@@ -49,6 +52,13 @@ LAB  = node "<SKILL_DIR>/lab/lab.js" --game "<GAME_DIR>"
 5. `$LAB classify` then `$LAB report --post` (`--post` mirrors a summary into game-studio #qa if a
    studio exists for this game).
 5. Give Boss: verdict, top issues, bot table, persona ratings, report path.
+
+## 2b. Regression gate (free, every build)
+Once a build plays well: `$LAB baseline set` (from the current run's bots; commit `.playtest/baseline.json`).
+After each change: `$LAB check`. It starts a new run, replays the baseline's seeds, and exits 1 when a policy
+fails more often than before or a metric mean moved beyond tolerance (`config.check`, see CONTRACT.md §4).
+Intended changes (a rebalance): mark the metric `better`, widen its tolerance, or re-baseline with Boss's OK.
+Never re-baseline just to make a failing check pass.
 
 ## 3. Persona prompt
 ```

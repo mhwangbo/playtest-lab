@@ -13,6 +13,9 @@ extends Node
 ##   is_done() -> bool
 ##   metrics() -> Dictionary               flat numbers, aggregated across runs
 ##   is_ready() -> bool                    optional; false while loading
+##   check_invariants() -> Array           optional; rules that must always hold. Return [] when fine, else
+##                                         Strings or {"id": .., "message": .., "severity": "P0".."P3"}.
+##                                         Checked after every reset/step; the lab stops the run and saves a trace.
 
 const PROTOCOL := "playtest-bridge/1"
 const TARGET_GROUP := "playtest_target"
@@ -159,7 +162,12 @@ func _reply_state() -> void:
 	if t == null:
 		_send({"ok": false, "error": "target disappeared"})
 		return
-	_send({"ok": true, "done": bool(t.call("is_done")), "obs": t.call("observe")})
+	var reply := {"ok": true, "done": bool(t.call("is_done")), "obs": t.call("observe")}
+	if t.has_method("check_invariants"):
+		var violations: Variant = t.call("check_invariants")
+		if violations is Array and not violations.is_empty():
+			reply["violations"] = violations
+	_send(reply)
 
 
 func _target() -> Node:

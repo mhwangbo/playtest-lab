@@ -1,6 +1,6 @@
 {
   "name": "playtest-lab",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Playtest group for any game: headless bot players, AI persona playtesters, and prioritized playtest reports. Claude Code skill + zero-dependency CLI.",
   "license": "MIT",
   "bin": { "playtest-lab": "lab/lab.js" },

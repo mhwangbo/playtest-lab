@@ -11,7 +11,7 @@ It answers two different questions, cheaply:
 
 | Question | Who answers it | Cost |
 |---|---|---|
-| **Is it broken / balanced?** Crashes, softlocks, difficulty curve, skill gradient, dominant strategies | **Bots**: headless, deterministic, thousands of runs | free (CPU) |
+| **Is it broken / balanced?** Crashes, broken rules, logged errors, softlocks, regressions, difficulty curve, skill gradient | **Bots**: headless, deterministic, thousands of runs | free (CPU) |
 | **Is it clear / fun?** Onboarding, confusion, feel, "would I play again" | **Personas**: AI playtesters playing the real build, with a rubric and mandatory criticism | about $0.40–1.30 per session |
 
 Both write into one versioned report: `playtest-report.json` plus `report.md`. It contains prioritized issues, a suggested ticket for each issue, and per-level tables.
@@ -24,6 +24,11 @@ Both write into one versioned report: `playtest-report.json` plus `report.md`. I
   - Plays your game through a small **adapter** over many seeds, with idle, random and your own skill policies.
   - Aggregates metrics as mean and p10/p50/p90.
   - Reports crashes and never-ending runs as P0/P1 issues, and supports your own balance alarms.
+- **Bug pack** (free and deterministic)
+  - **Invariants:** declare rules that must always hold (in the adapter, a Godot `check_invariants()`, or Unity `IPlaytestInvariants`). A broken rule stops the run and becomes a bug.
+  - **Logged errors:** Unity exceptions, Godot `ERROR:` lines and `console.error` count, even when the game survives them. An engine that dies mid-run is a P0 crash with the reason and the game's own stack frames.
+  - **Traces:** every failing run is saved. `lab.js replay <trace>` reproduces it exactly, and `--expect fixed` checks the fix.
+  - **Regression gate:** `lab.js baseline set` once, then `lab.js check` after every change. It exits 1 when bots fail more often or a metric drifts past its tolerance.
 - **Engine bridge** (`playtest-bridge/1`)
   - Newline JSON over localhost.
   - The game advances **only** when the lab asks for frames, on a fixed timestep, so runs are **deterministic per seed**.
@@ -89,7 +94,7 @@ Then spawn a persona with the prompt in [SKILL.md §3b](SKILL.md). Write a `.pla
    ```
 2. **Bots:** implement one `IPlaytestTarget` (reset with a seed, apply action, observe, done, metrics), make a Windows build, and point the adapter at it:
    ```js
-   export const bridge = { command: 'Builds/Win/MyGame.exe', args: ['-batchmode', '-nographics', '-playtestPort', '{PORT}'] };
+   export const bridge = { command: 'Builds/Win/MyGame.exe', args: ['-batchmode', '-nographics', '-playtestPort', '{PORT}', '-logFile', '-'] };
    ```
    The worked example is [examples/unity-coinline](examples/unity-coinline): 80 headless runs in about 6 s, deterministic.
 3. **Personas:** add
@@ -107,6 +112,17 @@ Then spawn a persona with the prompt in [SKILL.md §3b](SKILL.md). Write a `.pla
    export const bridge = { command: process.env.GODOT_BIN || 'godot', cwd: '.', args: ['--headless', '--fixed-fps', '60', '--path', '.', '--', '--playtestPort={PORT}'] };
    ```
    The worked example is [examples/godot-coinline](examples/godot-coinline). It gives the same results as the Unity sample and is deterministic.
+
+### Catch regressions (any engine)
+
+```bash
+node lab/lab.js --game path/to/game baseline set      # after a good bots run; commit .playtest/baseline.json
+node lab/lab.js --game path/to/game check             # after each change: exit 0 = same as baseline, 1 = regression
+node lab/lab.js --game path/to/game replay .playtest/runs/R3/traces/careful-s4-crash.json --expect fixed
+```
+
+`check` reruns the baseline's seeds, so any difference is a real change in the game. Set tolerances, or say
+which way a metric should move, in `.playtest/config.json` → `check` ([CONTRACT.md](CONTRACT.md) §4).
 
 ### Engine-side bots (puzzles, turn-based, big games)
 
@@ -143,13 +159,10 @@ These came from real runs and are recorded in [LESSONS.md](LESSONS.md).
 
 - **No-integration mode:** personas drive any unmodified desktop game with screenshots and real mouse and keyboard (computer-use). Slower, but zero integration.
 - **Unreal** bridge (C++ subsystem or Python), and **Android** (emulator or device via adb).
-- **Bug pack**, all free and deterministic:
-  - invariant hooks
-  - engine error-log capture
-  - record, replay and automatic minimization of failing action traces
+- **Bug pack, part 2** (part 1 shipped in 0.2: invariants, logged errors, traces and replay, `lab check`):
+  - automatic minimization of failing traces
   - chaos and novelty bots
   - coverage reports
-  - a `lab check` regression gate against the last baseline
 - **Fun metrics report:** skill gradient, luck vs skill share, dominant strategies, tension curve, learning curve.
 - **Replay-review personas:** cheaper still; they critique recorded keyframes instead of playing live.
 - **Human telemetry import:** calibrate bots and personas against real players.

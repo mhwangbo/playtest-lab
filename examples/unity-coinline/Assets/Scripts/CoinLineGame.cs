@@ -5,7 +5,7 @@ using UnityEngine;
 /// Tiny 1D sample game for the Playtest Lab Unity bridge: move along a line, grab coins,
 /// dodge a hazard that relocates every few seconds. A run lasts <see cref="RunSeconds"/>.
 /// </summary>
-public sealed class CoinLineGame : MonoBehaviour, IPlaytestTarget
+public sealed class CoinLineGame : MonoBehaviour, IPlaytestTarget, IPlaytestInvariants
 {
     private const float LineLength = 20f;
     private const float MoveSpeed = 6f;
@@ -87,6 +87,15 @@ public sealed class CoinLineGame : MonoBehaviour, IPlaytestTarget
     {
         score = _score, died = _died ? 1 : 0, survivedSeconds = _elapsed,
     });
+
+    /// <summary>Rules that must always hold; a broken one becomes a bug finding with a replayable trace.</summary>
+    public string InvariantsJson()
+    {
+        var broken = new System.Collections.Generic.List<string>();
+        if (_x < 0f || _x > LineLength) broken.Add("\"player-on-line\"");
+        if (_coin < 0f || _coin > LineLength) broken.Add("\"coin-on-line\"");
+        return "[" + string.Join(",", broken) + "]";
+    }
 
     private float RandomPos() => (float)_rng.NextDouble() * LineLength;
 

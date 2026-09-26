@@ -245,7 +245,13 @@ namespace PlaytestLab
             var t = ResolveTarget();
             if (t == null) { Reply(Error("target disappeared")); return; }
             string done = t.IsDone ? "true" : "false";
-            Reply($"{{\"ok\":true,\"done\":{done},\"obs\":{OrEmpty(t.ObserveJson())}}}");
+            string violations = "";
+            if (t is IPlaytestInvariants inv)
+            {
+                string v = inv.InvariantsJson();
+                if (!string.IsNullOrWhiteSpace(v) && v.Trim() != "[]") violations = $",\"violations\":{v}";
+            }
+            Reply($"{{\"ok\":true,\"done\":{done},\"obs\":{OrEmpty(t.ObserveJson())}{violations}}}");
         }
 
         private System.Collections.IEnumerator Capture(string path, float scale)

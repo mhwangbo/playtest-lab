@@ -10,7 +10,7 @@ Format: date · symptom · cause · fix · status (NEW / FOLDED into <file>).
 ### 2026-09-25 · live-lite persona (Haiku + text perception) rated 5/5 and missed the verified onboarding issue
 - cause: perception text gives superhuman eyes — exact speck counts/positions and causal event lines ("a speck flew into the big white circle and vanished") make the rules legible in a way the pixels don't
 - fix: use live-lite for progression/balance/replay; keep screenshot personas for first impressions; next: salience-limited perception (no exact counts, events only near the player's focus) and a vision-first opening minute
-- status: FOLDED into SKILL.md §3b (bias note); salience filter NEW
+- status: FOLDED into SKILL.md §3b (bias note); salience filter FOLDED into examples/mothlight.perception.js (focus radius, vague counts) and generalized as `window.__labSalience` in lab/live-harness.js (0.2.0)
 
 ### 2026-09-25 · Haiku personas skip or fake logging steps
 - symptom: v2 never called `persona done` (0 issues, 4 notes); v3 reported "3 issues logged" but never called `__live.issue()`
@@ -29,3 +29,13 @@ Format: date · symptom · cause · fix · status (NEW / FOLDED into <file>).
 - cause: a `play` call from the wrong folder errored with "run lab.js init", and the Haiku persona obeyed the hint
 - fix: `play` no longer looks for a game folder at all; persona prompts allow only `play` commands; stray folder removed
 - status: FOLDED into lab.js + SKILL.md §3c
+
+### 2026-09-25 · an engine that crashed mid-run made every later seed "crash" too
+- cause: the bridge kept the dead connection; on Windows the death arrives as ECONNRESET (a socket error), not a clean close
+- fix: mark the client closed on error or close, start a fresh game process for the next seed, and put the crash reason in the finding
+- status: FOLDED into lab/bridge.js (0.2.0)
+
+### 2026-09-25 · crash findings showed only native stack noise
+- cause: the last lines of a Unity or Godot crash dump are OS frames and symbol-lookup errors
+- fix: keep the reason lines and the game's own frames (Mono JIT, `res://`, `.cs`/`.gd` lines) from the recent output; identify an engine crash by "the process died", not by its dump text, so replays still match
+- status: FOLDED into lab/bridge.js + lab/bots.js (0.2.0)

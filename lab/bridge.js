@@ -8,12 +8,17 @@
  *   → {"cmd":"hello"}                          ← {"ok":true,"protocol":"playtest-bridge/1","game":"..","engine":".."}
  *   → {"cmd":"reset","seed":7}                 ← {"ok":true,"done":false,"obs":{...}}
  *   → {"cmd":"step","n":6,"action":"<json>"}   ← {"ok":true,"done":false,"obs":{...}}   (action is a JSON *string*)
+ *                                              optional in reset/step replies: "violations":["rule id", {"id","message","severity"}]
  *   → {"cmd":"metrics"}                        ← {"ok":true,"metrics":{...}}
  *   → {"cmd":"quit"}                           ← {"ok":true}
  *   errors                                     ← {"ok":false,"error":".."}
  *
  * The engine side runs `n` real frames with a fixed timestep between replies, so results are
  * deterministic per seed as long as the game seeds its own randomness from `reset`.
+ *
+ * The game's stdout/stderr is kept so each bot run can be checked for logged errors (Unity exceptions
+ * with `-logFile -`, Godot `ERROR:` / `SCRIPT ERROR:`). Output can arrive a moment after the reply that
+ * ends a run, so the lab waits `logSettleMs` before reading it.
  */
 'use strict';
 const net = require('net');
@@ -38,8 +43,9 @@ class BridgeClient {
       }
     });
     const fail = (e) => { for (const w of this.queue.splice(0)) w.reject(e); };
-    sock.on('error', fail);
-    sock.on('close', () => fail(new Error('bridge: connection closed')));
+    // A game that dies shows up as ECONNRESET on Windows and as a plain close elsewhere.
+    sock.on('error', (e) => { this.closed = true; fail(e); });
+    sock.on('close', () => { this.closed = true; fail(new Error('bridge: connection closed')); });
   }
   request(obj, timeoutMs = 30000) {
     return new Promise((resolve, reject) => {
@@ -50,6 +56,15 @@ class BridgeClient {
       this.sock.write(JSON.stringify(obj) + '\n');
     });
   }
+}
+
+// Crash dumps are mostly native frames and symbol-lookup noise; keep the reason and the game's own frames.
+const CRASH_KEEP = /Exception|ERROR:|SCRIPT ERROR|signal \d|\(Mono JIT Code\)|res:\/\/|\.(cs|gd):\d+/i;
+const CRASH_NOISE = /SymGetSymFromAddr64|no debug info|crash report generated|^\s*\*\s|^0x[0-9a-f]+ \((?!Mono JIT)/i;
+function crashSummary(text) {
+  const lines = String(text).split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const keep = [...new Set(lines.filter((l) => CRASH_KEEP.test(l) && !CRASH_NOISE.test(l)))].slice(0, 4);
+  return (keep.length ? keep : lines.slice(-5)).map((l) => l.slice(0, 200)).join(' | ');
 }
 
 function freePort() {
@@ -83,22 +98,30 @@ async function connectWithRetry(port, timeoutMs, proc) {
  */
 function createBridgeAdapter(mod, gameRoot) {
   const cfg = mod.bridge;
-  let client = null; let proc = null; let log = '';
+  let client = null; let proc = null;
+  // Rolling game output: `tail` for startup errors, `buf` (with absolute offsets) for per-run error checks.
+  let tail = ''; let buf = ''; let bufStart = 0; let total = 0;
+  const LOG_KEEP = 256 * 1024;
   const meta = Object.assign({ dt: 1 / 60, decisionEvery: 6, maxSeconds: 300 }, mod.meta || {});
 
   async function ensure() {
-    if (client) return client;
+    if (client && !client.closed) return client;
+    // The game died mid-run (a real crash): drop the dead process and start a fresh one for the next seed.
+    if (client) { client = null; if (proc && proc.exitCode === null) try { proc.kill(); } catch {} }
     const port = cfg.port || await freePort();
     if (cfg.command) {
       // Bare names ("godot") are looked up on PATH; anything with a separator is relative to the game folder.
       const cmd = path.isAbsolute(cfg.command) || !/[\\/]/.test(cfg.command) ? cfg.command : path.resolve(gameRoot, cfg.command);
       const args = (cfg.args || ['-batchmode', '-nographics', '-playtestPort', '{PORT}']).map((a) => String(a).replace('{PORT}', port));
       proc = spawn(cmd, args, { cwd: cfg.cwd ? path.resolve(gameRoot, cfg.cwd) : path.dirname(cmd), stdio: ['ignore', 'pipe', 'pipe'], windowsHide: cfg.hideWindow !== false });
-      const keep = (d) => { log = (log + d).slice(-4000); };
+      const keep = (d) => {
+        d = String(d); total += d.length; tail = (tail + d).slice(-4000); buf += d;
+        if (buf.length > LOG_KEEP) { bufStart += buf.length - LOG_KEEP; buf = buf.slice(-LOG_KEEP); }
+      };
       proc.stdout.on('data', keep); proc.stderr.on('data', keep);
     }
     let sock;
-    try { sock = await connectWithRetry(port, cfg.startupTimeoutMs || 60000, proc); } catch (e) { throw new Error(`${e.message}\n--- game output tail ---\n${log}`); }
+    try { sock = await connectWithRetry(port, cfg.startupTimeoutMs || 60000, proc); } catch (e) { throw new Error(`${e.message}\n--- game output tail ---\n${tail}`); }
     client = new BridgeClient(sock);
     const hello = await client.request({ cmd: 'hello' });
     if (hello.protocol !== PROTOCOL) throw new Error(`bridge: protocol mismatch ${hello.protocol} ≠ ${PROTOCOL}`);
@@ -107,6 +130,18 @@ function createBridgeAdapter(mod, gameRoot) {
   }
 
   const stepTimeout = cfg.stepTimeoutMs || 30000;
+  const toRegex = (list) => (list || []).map((x) => (x instanceof RegExp ? x : new RegExp(x)));
+  // A lost connection usually means the game crashed: put the crash reason from its output into the error.
+  const req = async (obj, timeoutMs) => {
+    try { return await client.request(obj, timeoutMs); } catch (e) {
+      if (client && client.closed && proc) {
+        await new Promise((r) => setTimeout(r, 200));
+        throw new Error(`${e.message} (game exit code ${proc.exitCode}); game output: ${crashSummary(buf.slice(-65536))}`);
+      }
+      throw e;
+    }
+  };
+  const setState = (sim, r) => { sim.obs = r.obs; sim.done = !!r.done; sim.violations = r.violations || []; };
   const adapter = {
     meta,
     policies: mod.policies || {},
@@ -114,24 +149,35 @@ function createBridgeAdapter(mod, gameRoot) {
     idleAction: mod.idleAction,
     randomAction: mod.randomAction,
     actionMenu: mod.actionMenu,
+    // Adapter-side rules see what the bots see (the observation); engine-side rules arrive as `violations`.
+    invariants: mod.invariants ? (sim) => mod.invariants(sim.obs) : undefined,
+    errorPatterns: toRegex(cfg.errorPatterns),
+    ignoreErrors: toRegex(cfg.ignoreErrors),
     async create(seed) {
-      const c = await ensure();
-      const r = await c.request({ cmd: 'reset', seed }, stepTimeout);
-      return { obs: r.obs, done: !!r.done };
+      await ensure();
+      const sim = {};
+      setState(sim, await req({ cmd: 'reset', seed }, stepTimeout));
+      return sim;
     },
     observe: (sim) => sim.obs,
     done: (sim) => sim.done,
     async stepMany(sim, action, n) {
-      const r = await client.request({ cmd: 'step', n, action: JSON.stringify(action ?? {}) }, stepTimeout);
-      sim.obs = r.obs; sim.done = !!r.done;
+      setState(sim, await req({ cmd: 'step', n, action: JSON.stringify(action ?? {}) }, stepTimeout));
       return sim.done;
     },
-    async metrics() { return (await client.request({ cmd: 'metrics' })).metrics || {}; },
+    async metrics() { return (await req({ cmd: 'metrics' })).metrics || {}; },
     async close() {
       if (client) { try { await client.request({ cmd: 'quit' }, 5000); } catch {} client.sock.destroy(); client = null; }
       if (proc && proc.exitCode === null) { setTimeout(() => { try { proc.kill(); } catch {} }, 3000).unref(); }
     },
-    gameLog: () => log,
+    gameLog: () => tail,
+    /** Offset into the game's output; pair with logSince to get what one run printed. */
+    logMark: () => total,
+    async logSince(mark) {
+      if (!proc) return '';
+      await new Promise((r) => setTimeout(r, cfg.logSettleMs ?? 15));
+      return buf.slice(Math.max(0, (mark ?? 0) - bufStart));
+    },
     /** Raw protocol request (e.g. screenshot) on the live connection. */
     async request(obj, timeoutMs) { await ensure(); return client.request(obj, timeoutMs || stepTimeout); },
   };

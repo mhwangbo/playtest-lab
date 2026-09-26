@@ -117,6 +117,24 @@
   //   visionFirstSeconds: during this opening window the scene text is withheld; look at screenshots instead
   const cfg = Object.assign({ fidelity: 'human', visionFirstSeconds: 0 }, window.__labConfig || {});
 
+  // Salience helpers for perception modules (loaded after this script). Exact counts, positions and
+  // far-away events make a game look clearer to a persona than pixels do to a human, so 'human'
+  // fidelity should describe the scene through these. Example: examples/mothlight.perception.js.
+  window.__labSalience = {
+    /** 0 → 'no', 2 → 'a couple of', 4 → 'a few', 9 → 'several', 30 → 'lots of'. */
+    vague(n) { return n === 0 ? 'no' : n <= 2 ? 'a couple of' : n <= 5 ? 'a few' : n <= 12 ? 'several' : 'lots of'; },
+    /** Round a coordinate to a grid step, like a glance does. */
+    snap(n, step = 20) { return Math.round(n / step) * step; },
+    /** Coarse screen region ('top-left', 'center of the screen', ...) for a point in a w × h screen. */
+    region(x, y, w, h) {
+      const col = x < w / 3 ? 'left' : x < (2 * w) / 3 ? 'middle' : 'right';
+      const row = y < h / 3 ? 'top' : y < (2 * h) / 3 ? 'center' : 'bottom';
+      return row === 'center' && col === 'middle' ? 'center of the screen' : `${row}-${col}`;
+    },
+    /** True when a point is within the player's focus (e.g. their avatar or cursor). Big, obvious events should skip this. */
+    near(p, focus, radius = 220) { return !!p && !!focus && Math.hypot(p.x - focus.x, p.y - focus.y) < radius; },
+  };
+
   function perceive() {
     const g = window.__labGame;
     const gameTime = frame / 60;

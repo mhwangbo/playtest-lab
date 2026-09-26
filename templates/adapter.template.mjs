@@ -40,3 +40,14 @@ export function actionMenu(obs) { return [{ id: 'idle', label: 'do nothing', act
 
 /** Optional: turn aggregates into findings. policies[name].metrics[m] = {mean,p10,p50,p90,min,max}. */
 export function findings(policies) { return []; }
+
+/**
+ * Optional: rules that must always hold, checked at every bot decision. Return [] when fine, else strings
+ * (the rule id) or { id, message, severity }. A broken rule stops the run, becomes a bug finding and is
+ * saved as a trace you can replay (`lab.js replay <trace>`). Engine games get the observation instead of sim.
+ */
+export function invariants(sim) {
+  const broken = [];
+  // if (sim.hp < 0) broken.push({ id: 'hp-non-negative', message: `hp is ${sim.hp}` });
+  return broken;
+}

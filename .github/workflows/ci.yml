@@ -23,5 +23,8 @@ jobs:
           node lab/lab.js init --game "$RUNNER_TEMP/game" --name Smoke
           cp test/fixtures/line.adapter.mjs "$RUNNER_TEMP/game/.playtest/adapter.mjs"
           node lab/lab.js --game "$RUNNER_TEMP/game" run new --label ci
-          node lab/lab.js --game "$RUNNER_TEMP/game" bots --runs 10
+          node lab/lab.js --game "$RUNNER_TEMP/game" bots --runs 15
+          node lab/lab.js --game "$RUNNER_TEMP/game" replay "$(ls "$RUNNER_TEMP"/game/.playtest/runs/R1/traces/*.json | head -1)" --expect reproduced
           node lab/lab.js --game "$RUNNER_TEMP/game" report
+          node lab/lab.js --game "$RUNNER_TEMP/game" baseline set
+          node lab/lab.js --game "$RUNNER_TEMP/game" check
