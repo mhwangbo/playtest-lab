@@ -31,6 +31,11 @@ Ambos escriben en un único informe versionado: `playtest-report.json` más `rep
   - **Errores registrados:** cuenta las excepciones de Unity, las líneas `ERROR:` de Godot y los `console.error`, incluso cuando el juego sobrevive. Un motor que muere a mitad de partida es un cuelgue P0 con la causa y los propios stack frames del juego.
   - **Trazas:** cada partida fallida se guarda. `lab.js replay <trace>` la reproduce exactamente, y `--expect fixed` comprueba la corrección.
   - **Puerta de regresión:** ejecuta `lab.js baseline set` una vez, y luego `lab.js check` después de cada cambio. Devuelve el código 1 cuando los bots fallan más a menudo o una métrica se desvía más allá de su tolerancia.
+- **Informe de diversión** (`lab.js fun`, gratis, con las mismas partidas de los bots)
+  - **Gradiente de habilidad:** ¿jugar mejor da más puntos? Señala una política real que pierde contra idle o random, un gradiente plano y un random que llega casi hasta la mejor política.
+  - **Suerte frente a habilidad:** divide la varianza de la puntuación en política (habilidad), semilla (suerte) y el resto. En NIGHTBEAM mostró que el primer hito era un 73% suerte entre los dos bots competentes, y un 18% tras los ajustes de balance.
+  - **Estrategia dominante:** entre políticas igual de hábiles que juegan distinto, ¿gana una en casi todas las semillas?
+  - **Curva de tensión:** exporta `tension(obs)` y obtén una curva de 10 tramos por política, con avisos de curvas planas, picos tempranos y finales más tranquilos que el comienzo.
 - **Puente con el motor** (`playtest-bridge/1`)
   - JSON delimitado por saltos de línea sobre localhost.
   - El juego avanza **solo** cuando el lab pide fotogramas, con un paso de tiempo fijo, así que las partidas son **deterministas por semilla**.
@@ -166,7 +171,7 @@ Todo esto surgió de ejecuciones reales y está documentado en [LESSONS.md](LESS
   - minimización automática de trazas que fallan
   - bots de caos y de novedad
   - informes de cobertura
-- **Informe de métricas de diversión:** gradiente de habilidad, proporción de suerte frente a habilidad, estrategias dominantes, curva de tensión, curva de aprendizaje.
+- **Informe de diversión, parte 2:** curva de aprendizaje (qué tan rápido mejoran personas y jugadores entre intentos) y tensión a partir de las puntuaciones de la rúbrica de las personas.
 - **Personas que revisan repeticiones:** aún más baratas; critican fotogramas clave grabados en lugar de jugar en vivo.
 - **Importación de telemetría humana:** calibrar bots y personas con jugadores reales.
 - **Clasificación de feedback basada en modelos** como plugin (p. ej., un clasificador local como [laya](https://github.com/NandhaKishorM/laya)).

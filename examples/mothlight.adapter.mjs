@@ -76,6 +76,13 @@ export const policies = {
   'full-glow': (o, r, m) => carrier(o, r, m, { greedyGlow: true, avoid: false }),
 };
 
+// Fun report: moths close to singeing, or a crowd following the lantern near a hazard, is the tense part.
+export function tension(o) {
+  const L = o.lantern;
+  const nearHazard = o.hazards.reduce((a, h) => Math.max(a, 1 - Math.hypot(h.x - L.x, h.y - L.y) / (h.range + 200)), 0);
+  return Math.max(o.maxHeat, Math.min(1, o.following / 8) * Math.max(0, nearHazard));
+}
+
 export function actionMenu(o) {
   const L = o.lantern; const step = 80;
   const moves = [['stay', 0, 0], ['up', 0, -step], ['down', 0, step], ['left', -step, 0], ['right', step, 0]];

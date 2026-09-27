@@ -8,6 +8,7 @@
  * Failing runs can be saved as action traces (playtest-trace/1) and replayed exactly.
  */
 'use strict';
+const { runExtras } = require('./fun.js');
 
 const TRACE = 'playtest-trace/1';
 const KINDS = ['crash', 'invariant', 'error', 'softlock'];
@@ -60,7 +61,8 @@ function errorLines(text, patterns, ignore) {
 
 /**
  * One seeded run. Decisions come from `policy`, or from a recorded trace when `replay` is a Map(step → action).
- * → { finished, seconds, steps, metrics, outcome: null | {kind, message, id?, severity?, step}, actions, dt, every, maxSteps }
+ * → { finished, seconds, steps, metrics, outcome: null | {kind, message, id?, severity?, step}, actions, samples, dt, every, maxSteps }
+ * `samples` holds [step, adapter.tension(obs)] at each decision when the adapter exports tension (fun report).
  */
 async function runOne(adapter, policy, seed, opts = {}, replay = null) {
   const meta = adapter.meta || {};
@@ -71,7 +73,10 @@ async function runOne(adapter, policy, seed, opts = {}, replay = null) {
   const memo = {};
   // Only action changes are recorded; replay keeps the last one in effect, as the live run did.
   const actions = []; let lastKey; let replayed = {};
+  const samples = [];
   const decide = async (obs, sim, step) => {
+    // Tension is a reading for the fun report, never a failure: a throwing tension() is ignored.
+    if (adapter.tension) { try { samples.push([step, Number(await adapter.tension(obs))]); } catch {} }
     let a;
     if (replay) { if (replay.has(step)) replayed = replay.get(step); a = replayed; } else a = await policy(obs, rng, memo, sim);
     const key = JSON.stringify(a ?? null);
@@ -127,7 +132,7 @@ async function runOne(adapter, policy, seed, opts = {}, replay = null) {
   const logged = [...consoleErrors, ...(adapter.logSince ? errorLines(await adapter.logSince(logMark), adapter.errorPatterns, adapter.ignoreErrors) : [])];
   if (!outcome && logged.length) outcome = { kind: 'error', id: errorKey(logged[0]), message: logged[0], count: logged.length, step: steps };
   if (!outcome && !finished) outcome = { kind: 'softlock', message: `not done after ${+(steps * dt).toFixed(2)}s`, step: steps };
-  return { finished, seconds: steps * dt, steps, metrics, outcome, actions, dt, every, maxSteps };
+  return { finished, seconds: steps * dt, steps, metrics, outcome, actions, samples, dt, every, maxSteps };
 }
 
 function traceOf(adapter, policyName, seed, r) {
@@ -162,7 +167,7 @@ async function runBots(adapter, opts = {}) {
       const keys = [...new Set(rows.flatMap((r) => Object.keys(r.metrics || {})))];
       const failureKinds = Object.fromEntries(KINDS.map((k) => [k, failed.filter((f) => f.r.outcome.kind === k).length]));
       out.policies[name] = { runs: rows.length, failures: failed.length, failureKinds, metrics: Object.fromEntries(keys.map((k) => [k, stats(rows.map((r) => r.metrics[k]))])) };
-      out.rows.push(...rows.map((r) => ({ policy: r.policy, seed: r.seed, finished: r.finished, seconds: +r.seconds.toFixed(2), metrics: r.metrics, ...(r.outcome ? { outcome: r.outcome.kind } : {}) })));
+      out.rows.push(...rows.map((r) => ({ policy: r.policy, seed: r.seed, finished: r.finished, seconds: +r.seconds.toFixed(2), metrics: r.metrics, ...(r.outcome ? { outcome: r.outcome.kind } : {}), ...runExtras(r.actions, r.steps, r.samples) })));
       out.findings.push(...failureFindings(adapter, name, runs, failed, opts.saveTrace, opts.maxTraces ?? 3));
     }
   } finally {

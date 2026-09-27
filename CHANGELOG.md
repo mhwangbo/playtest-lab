@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.3.0 (2026-09-27)
+
+The fun report: balance numbers from the bot runs you already have.
+
+- **`lab.js fun`** and a `fun` section in every report (CONTRACT §5), computed from `bots.json` rows with no extra
+  runs:
+  - **skill gradient:** mean score per policy in skill order. Flags a real policy losing to idle/random (or any
+    pair out of a declared `fun.skillOrder`), a flat gradient, and random play getting most of the way to the best.
+  - **luck vs skill:** the score's variance over policy × seed, split into skill, luck and the rest. On NIGHTBEAM
+    it tracked the balance work: luck 73% at the M1 baseline, 40% after the first retune, 18% at M2.
+  - **upsets:** how often the less skilled of two neighbouring policies wins the same seed.
+  - **dominant strategy** among `fun.strategies` (equally skilled, different play).
+  - **action mix** of the best policy (discrete actions only).
+  - **tension curve:** adapters can export `tension(obs)` → 0..1, sampled at every bot decision (bridge games too);
+    flags flat curves, early peaks and endings calmer than the start.
+- Fun findings join the report's issues as `bot:fun` (balance P2, feel P3) with suggested design tickets. They are
+  recomputed on every report and never written to `issues.jsonl`.
+- `bots.json` rows gain `actionMix` and, with `tension`, a 10-slice `tension` array. Old runs still work: the fun
+  report just skips those parts.
+- Examples: Mothlight adapter exports `tension`; the adapter template documents it.
+
 ## 0.2.1 (2026-09-26)
 
 Fixes from the first game a studio built end to end on the Godot bridge.

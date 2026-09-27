@@ -154,6 +154,7 @@ function createBridgeAdapter(mod, gameRoot) {
     idleAction: mod.idleAction,
     randomAction: mod.randomAction,
     actionMenu: mod.actionMenu,
+    tension: mod.tension,
     // Adapter-side rules see what the bots see (the observation); engine-side rules arrive as `violations`.
     invariants: mod.invariants ? (sim) => mod.invariants(sim.obs) : undefined,
     errorPatterns: toRegex(cfg.errorPatterns),

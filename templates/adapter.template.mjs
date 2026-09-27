@@ -42,6 +42,13 @@ export function actionMenu(obs) { return [{ id: 'idle', label: 'do nothing', act
 export function findings(policies) { return []; }
 
 /**
+ * Optional: how tense this moment is, 0 (calm) to 1 (on the edge), read from the observation at every bot
+ * decision. The fun report averages it over 10 slices of each run and flags flat curves, early peaks and
+ * endings calmer than the start (`lab.js fun`). E.g. danger nearby, time pressure, or how close a loss is.
+ */
+// export function tension(obs) { return 0; }
+
+/**
  * Optional: rules that must always hold, checked at every bot decision. Return [] when fine, else strings
  * (the rule id) or { id, message, severity }. A broken rule stops the run, becomes a bug finding and is
  * saved as a trace you can replay (`lab.js replay <trace>`). Engine games get the observation instead of sim.

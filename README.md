@@ -29,6 +29,11 @@ Both write into one versioned report: `playtest-report.json` plus `report.md`. I
   - **Logged errors:** Unity exceptions, Godot `ERROR:` lines and `console.error` count, even when the game survives them. An engine that dies mid-run is a P0 crash with the reason and the game's own stack frames.
   - **Traces:** every failing run is saved. `lab.js replay <trace>` reproduces it exactly, and `--expect fixed` checks the fix.
   - **Regression gate:** `lab.js baseline set` once, then `lab.js check` after every change. It exits 1 when bots fail more often or a metric drifts past its tolerance.
+- **Fun report** (`lab.js fun`, free, from the same bot runs)
+  - **Skill gradient:** does better play score better? Flags a real policy losing to idle or random, a flat gradient, and random play getting most of the way to the best.
+  - **Luck vs skill:** splits the score's variance into policy (skill), seed (luck) and the rest. On NIGHTBEAM it showed the first milestone was 73% luck between the two competent bots, and 18% after the balance passes.
+  - **Dominant strategy:** among equally skilled policies that play differently, does one win nearly every seed?
+  - **Tension curve:** export `tension(obs)` and get a 10-slice curve per policy, with flags for flat curves, early peaks and endings calmer than the start.
 - **Engine bridge** (`playtest-bridge/1`)
   - Newline JSON over localhost.
   - The game advances **only** when the lab asks for frames, on a fixed timestep, so runs are **deterministic per seed**.
@@ -163,7 +168,7 @@ These came from real runs and are recorded in [LESSONS.md](LESSONS.md).
   - automatic minimization of failing traces
   - chaos and novelty bots
   - coverage reports
-- **Fun metrics report:** skill gradient, luck vs skill share, dominant strategies, tension curve, learning curve.
+- **Fun report, part 2:** learning curve (how fast personas and players improve across attempts), and tension from persona rubric scores.
 - **Replay-review personas:** cheaper still; they critique recorded keyframes instead of playing live.
 - **Human telemetry import:** calibrate bots and personas against real players.
 - **Model-based feedback classification** as a plugin (e.g. a local classifier such as [laya](https://github.com/NandhaKishorM/laya)).

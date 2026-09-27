@@ -1,6 +1,7 @@
 # Playtest Lab contracts
 
-Two interfaces, plus two files the lab writes for you (traces and the baseline). Everything else is internal.
+Two interfaces, plus two files the lab writes for you (traces and the baseline) and the fun report's settings.
+Everything else is internal.
 
 ## 1. Game adapter (input) — `<game>/.playtest/adapter.mjs`
 
@@ -19,6 +20,7 @@ worked example: `examples/mothlight.adapter.mjs`.
 | `randomAction(obs, rng)` | recommended | baseline policy `random` |
 | `policies` `{name: (obs, rng, memo, sim) => action}` | recommended | scripted skill levels |
 | `actionMenu(obs)` → `[{id, label, action}]` | optional | discrete choices |
+| `tension(obs)` → 0..1 | optional | how tense the moment is, sampled at every bot decision for the fun report (§5) |
 | `findings(policies)` → `[{title, severity, category, evidence}]` | optional | game-specific balance alarms |
 | `invariants(sim)` → `[]` or `[string | {id, message, severity}]` | optional | rules that must always hold, checked at every bot decision |
 
@@ -38,8 +40,8 @@ What counts as a failing run (each becomes a finding, and the run is saved as a 
 
 If the adapter exports `bridge`, the lab launches the game build and drives it over localhost TCP
 (newline-delimited JSON, protocol `playtest-bridge/1`, spec in `lab/bridge.js`). The adapter then only
-provides `meta`, `bridge`, `idleAction`, `randomAction`, `policies`, `findings` (optionally `actionMenu`, and
-`invariants(obs)`, which gets the observation); `observe`/`step`/`done`/`metrics` come from the engine-side target.
+provides `meta`, `bridge`, `idleAction`, `randomAction`, `policies`, `findings` (optionally `actionMenu`, `tension(obs)`,
+and `invariants(obs)`, which gets the observation); `observe`/`step`/`done`/`metrics` come from the engine-side target.
 Engine-side rules: Godot `check_invariants() -> Array` on the target node, Unity `IPlaytestInvariants`. They arrive
 as an optional `violations` array in reset/step replies.
 
@@ -94,6 +96,9 @@ in `args` to print its log to stdout. Override with `bridge.errorPatterns` / `br
 Additive in 0.2: `check` (`{status: "pass"|"fail", baselineRun, regressions, improved, rows}` when the run came
 from `lab.js check`, else null) and `issues[].traces` (paths of saved failing runs).
 
+Additive in 0.3: `fun` (the fun report, §5, minus its findings, which appear in `issues` with source `bot:fun`),
+or null when the run has no per-run bot rows (e.g. imported per-level results).
+
 Consumers (e.g. game-studio) read `suggestedTicket` to create tickets. Breaking changes bump the
 `contract` version; additive fields do not.
 
@@ -132,3 +137,29 @@ a holdout range: `lab.js check --seed 101` (same runs, different seeds). `lab.js
 and compares every row and failure, which is the proof for a clean build that has no failing trace to replay.
 
 Personas: `done` is refused until the persona has recorded at least `personas.minNotes` notes (default 3) in the run.
+
+## 5. Fun report — `lab.js fun`, and `fun` in the playtest report
+
+Computed from the run's `bots.json` rows, so it costs no extra runs; every report recomputes it.
+
+| Part | What it measures | Finding |
+|---|---|---|
+| skill gradient | mean score per policy, least to most skilled | a policy scoring below a less skilled one (P2); best barely above idle (P2); random reaching `randomMax` of the way to the best (P2) |
+| luck vs skill | variance of the score over policy × seed, split into skill (between policies), luck (between seeds) and the rest (a seed favouring one policy) | luck share above `luckMax` (P2) |
+| upsets | how often the less skilled of two neighbouring policies wins the same seed | none (context for the above) |
+| strategies | win share per seed among `strategies` (equally skilled, different play) | one wins at least `dominantMin` of seeds (P2) |
+| action mix | time share of the best policy's most-used actions; skipped for continuous actions | none |
+| tension | mean `tension(obs)` over 10 slices of each run, per policy | flat, peaks in the first 30%, or ends calmer than it starts (P3, `feel`) |
+
+The luck split compares the scripted policies (not idle/random) when there are two or more: random's gap to any real
+policy would otherwise make skill look like everything.
+
+Settings in `.playtest/config.json` (all optional):
+```jsonc
+"fun": { "score": "points", "better": "higher",          // default: a metric named score or points
+         "skillOrder": ["idle", "random", "greedy", "careful"], // default: idle, random, then by mean score
+         "strategies": ["rush", "turtle"], "luckPolicies": ["greedy", "careful"], "tensionPolicy": "careful",
+         "luckMax": 0.5, "randomMax": 0.8, "minSpread": 0.1, "dominantMin": 0.8 }
+```
+Without `skillOrder` the lab can only catch a real policy losing to idle or random; declare the order to check scripted
+policies against each other. Fun findings are recomputed per report and never written to `issues.jsonl`.

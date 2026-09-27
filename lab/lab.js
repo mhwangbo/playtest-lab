@@ -14,6 +14,7 @@ const { pathToFileURL } = require('url');
 const { runBots, replayTrace } = require('./bots.js');
 const { makeBaseline, compare, renderCheck } = require('./check.js');
 const { classifyText } = require('./classify.js');
+const { computeFun, renderFun } = require('./fun.js');
 
 const LAB_DIR = path.resolve(__dirname, '..');
 const CONTRACT = 'playtest-report/1';
@@ -183,13 +184,17 @@ class Lab {
     const bots = this.read(path.join('runs', runId, 'bots.json'), null);
     const notes = this.readLines(runId, 'notes.jsonl');
     const personas = this.readLines(runId, 'personas.jsonl');
-    const issues = this.readLines(runId, 'issues.jsonl').sort((a, b) => a.severity.localeCompare(b.severity));
+    // Fun findings are recomputed from bots.json on every report, so they never pile up in issues.jsonl.
+    const fun = bots && bots.rows && bots.rows.length ? computeFun(bots, c.fun || {}) : null;
+    const funIssues = fun ? fun.findings.map((f) => ({ ...f, repro: `lab.js fun --run ${runId}`, accept: [`\`lab.js fun\` on a new bot run no longer reports "${f.title.replace(/\d+%/g, 'N%')}"`] })) : [];
+    const issues = [...this.readLines(runId, 'issues.jsonl'), ...funIssues].sort((a, b) => a.severity.localeCompare(b.severity));
     const check = this.read(path.join('runs', runId, 'check.json'), null);
     const teamOf = { bug: 'engineering', crash: 'engineering', softlock: 'engineering', perf: 'engineering', balance: 'design', clarity: 'design', feel: 'design', ux: 'engineering', accessibility: 'engineering', audio: 'audio', other: 'design' };
     const report = {
       contract: CONTRACT, game: c.name, build: run.build || c.build, runId, created: now(), label: run.label || '',
       bots: bots ? { runsPerPolicy: bots.runsPerPolicy, seconds: bots.seconds, policies: bots.policies, levels: bots.levels } : null,
       check: check ? { status: check.status, baselineRun: check.baselineRun, regressions: check.regressions, improved: check.improved, rows: check.rows.filter((r) => r.status !== 'ok') } : null,
+      fun: fun ? (({ findings, ...rest }) => rest)(fun) : null,
       personas: personas.map((p) => ({ name: p.persona, rating: p.rating, summary: p.summary, wouldReplay: p.wouldReplay, scores: p.scores || {}, unsure: p.unsure || [] })),
       notes: notes.map((n) => ({ source: n.source, text: n.text, category: n.category, sentiment: n.sentiment })),
       issues: issues.map((i, k) => ({
@@ -254,6 +259,7 @@ function renderMd(r) {
     for (const [name, p] of Object.entries(r.bots.policies)) L.push(`| ${name} | ${metrics.map((m) => (p.metrics[m] ? `${fmt(p.metrics[m].mean)} (p10 ${fmt(p.metrics[m].p10)}–p90 ${fmt(p.metrics[m].p90)})` : '-')).join(' | ')} | ${p.failures} |`);
     L.push('');
   }
+  if (r.fun) L.push('## Fun metrics', '', ...renderFun(r.fun), '');
   if (r.check) {
     L.push(`## Regression check (vs ${r.check.baselineRun}): ${r.check.status.toUpperCase()}`, '');
     if (!r.check.rows.length) L.push('- no changes beyond tolerance');
@@ -301,6 +307,8 @@ const HELP = `lab.js — Playtest Lab   (global: --game <dir>  --run <RUN>  --js
   baseline set [--run R3] | show        save that run's bot results as the regression baseline
   check [--label ..] [--import file] [--seed N]
                                         new run: bots on the baseline's seeds (or a holdout range from N), compare, exit 1 on regression
+  fun [--run R3]                        fun metrics from that run's bots: skill gradient, luck vs skill, dominant
+                                        strategy, action mix, tension curve (settings: config.fun, see CONTRACT §5)
   determinism [--runs 10 --seed 1 --policies ..]
                                         run the bots twice and compare every row; exit 1 if anything differs
   note add --source persona:casual "text"        free-text feedback (auto-classified)
@@ -399,6 +407,15 @@ async function main() {
       const text = renderCheck(c);
       lab.studioPost('qa', `${c.status === 'pass' ? '✅' : '❌'} Playtest ${id} ${text}`);
       return out(c, `${text}\nrun ${id}; report: ${lab.p('runs', id, 'report.md')}`);
+    }
+    case 'fun': {
+      const id = lab.run(o);
+      const bots = lab.read(path.join('runs', id, 'bots.json'), null);
+      if (!bots) throw new Error(`no bots.json in ${id} — run \`lab.js bots\` first`);
+      const f = computeFun(bots, lab.config().fun || {});
+      const lines = [`fun metrics for ${id}`, ...renderFun(f)];
+      if (f.findings.length) lines.push('', 'findings (added to the report):', ...f.findings.map((x) => `  [${x.severity}] ${x.title}\n        ${x.evidence}`));
+      return out(f, lines.join('\n'));
     }
     case 'determinism': {
       // Same seeds twice; every per-seed row must match. Clean builds have no failing trace to replay, so this is the proof.

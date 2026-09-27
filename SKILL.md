@@ -44,6 +44,10 @@ LAB  = node "<SKILL_DIR>/lab/lab.js" --game "<GAME_DIR>"
    variance (p10–p90), failures. Crashes, broken invariants, logged errors, softlocks and alarms auto-log as
    issues; each failing run is saved as a trace. `$LAB replay <trace>` re-runs it exactly (use it to confirm a
    bug before reporting it, and `--expect fixed` to confirm the fix).
+   Then `$LAB fun` (free, no extra runs): skill gradient, luck vs skill share, upsets, dominant strategy among
+   `config.fun.strategies`, action mix, tension curve (if the adapter exports `tension(obs)`). Its findings go
+   into the report as `bot:fun` balance/feel issues. Use it to back balance calls with numbers: "careful beats
+   greedy on 97% of seeds" says more than "feels fair". Set `config.fun` (CONTRACT.md §5) when you write the adapter.
 3. **Personas** (costs tokens — ask Boss how many; default 2: first-timer + casual-mobile for new games).
    Spawn each as a background Agent with the prompt in §3, in parallel, each on its own browser port/tab.
 4. Persona issues start **UNVERIFIED** (excluded from the verdict and from tickets). For each, reproduce it
