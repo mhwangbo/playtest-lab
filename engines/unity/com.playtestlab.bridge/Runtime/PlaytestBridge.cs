@@ -267,7 +267,7 @@ namespace PlaytestLab
             yield return null;
             try
             {
-                if (!File.Exists(full)) throw new IOException("screenshot file never appeared");
+                if (!File.Exists(full)) throw new IOException("screenshot file never appeared (is the game window hidden or minimized? personas need a visible window)");
                 var shot = new Texture2D(2, 2, TextureFormat.RGB24, false);
                 shot.LoadImage(File.ReadAllBytes(full));
                 var tex = shot;

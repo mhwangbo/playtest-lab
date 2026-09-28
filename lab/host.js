@@ -26,7 +26,9 @@ async function host({ lab, runId, port, record }) {
   const mod = await import(require('url').pathToFileURL(path.resolve(lab.root, lab.config().adapter)).href);
   if (!mod.personaBridge) throw new Error('adapter has no personaBridge config (game build launched with graphics)');
   const runDir = lab.p('runs', runId);
-  const cfg = { ...mod.personaBridge, args: (mod.personaBridge.args || []).map((a) => String(a).replace('{RUN}', runDir)) };
+  // Personas play a visible window. The bridge hides engine windows by default (right for headless bots), but a
+  // hidden window cannot be captured (Unity on D3D12: "Failed to capture screen shot."), so `play shot` failed.
+  const cfg = { hideWindow: false, ...mod.personaBridge, args: (mod.personaBridge.args || []).map((a) => String(a).replace('{RUN}', runDir)) };
   const game = createBridgeAdapter({ ...mod, bridge: cfg }, lab.root);
   const sim = await game.create(1);
   const defaultFrames = mod.meta?.personaFrames || 40;

@@ -8,6 +8,9 @@ Fixes from the first non-score game on the fun report (a deterministic narrative
   floor and the random comparison now only use policies in the order.
 - Engine-side bots, whose adapter only sends `{"policy": name}`, were reported as "mostly one action". The action
   mix is now skipped for them, since their real choices never reach the lab.
+- Persona `play shot` failed on Unity Direct3D 12 builds: the bridge starts engine builds with a hidden window, which
+  cannot be captured. `lab.js host` now launches persona builds visible (`hideWindow: false` by default), and the Unity
+  bridge's error says to check for a hidden or minimized window. `hideWindow` is documented in CONTRACT §1b.
 
 ## 0.3.0 (2026-09-27)
 

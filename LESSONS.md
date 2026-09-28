@@ -45,3 +45,15 @@ Format: date · symptom · cause · fix · status (NEW / FOLDED into <file>).
 - cause: one TCP round trip per decision + 1 ms idle sleep; replay only covers failing runs; reset/is_ready behaviour and cwd default undocumented
 - fix: no Nagle + busy-poll in the Godot addon (8x faster), `lab.js determinism`, Godot replies to reset without a frame when ready (documented in CONTRACT §1b), cwd defaults to the game folder for engine binaries
 - status: FOLDED into lab/bridge.js, engines/godot, lab/lab.js, CONTRACT.md (0.2.1)
+
+### 2026-09-28 · first non-score game on the fun report (a deterministic narrative puzzle on the Unity bridge)
+- symptom: (1) `lab.js fun` printed "best is NaN% above idle" once the game declared a skillOrder without idle; (2) every engine-side policy was flagged "mostly one action"; (3) luck 0% / skill 100% on every run
+- cause: (1) the floor was picked from all policies that ran, not from the declared order; (2) engine-side bots only send `{"policy": name}`, so the lab never sees their real choices; (3) a deterministic puzzle has no luck by construction
+- fix: (1) floor and random comparison use only policies in the order; (2) action mix skipped for engine-side policies; (3) nothing to fix — for puzzles the useful numbers are days-to-solve, wrong-answer recovery and the reaction mix; the game reported a composite `insight_score` and put its targets in `check`
+- status: FOLDED into lab/fun.js (0.3.1)
+
+### 2026-09-28 · persona `play shot` failed on a Unity D3D12 build ("screenshot file never appeared")
+- symptom: every persona screenshot failed; the player log said `Failed to capture screen shot.`
+- cause: the bridge spawns engine builds with a hidden window by default (right for headless bots); a hidden window cannot be captured on D3D12
+- fix: `lab.js host` launches `personaBridge` builds visible (`hideWindow: false` default), the Unity bridge's error hints at a hidden/minimized window, CONTRACT §1b documents `hideWindow`
+- status: FOLDED into lab/host.js, engines/unity PlaytestBridge.cs, CONTRACT.md (0.3.1)

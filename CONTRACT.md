@@ -55,6 +55,10 @@ Working directory: `bridge.cwd` if set (relative to the game folder). Otherwise 
 (a built player) runs from its own folder, and anything else (an engine binary such as `godot` on PATH or installed
 elsewhere) runs from the game folder, so `--path .` works without setting `cwd`.
 
+Window: engine builds start with a hidden window (`bridge.hideWindow`, default true), which suits headless bot runs.
+`lab.js host` starts `personaBridge` builds visible (`hideWindow: false`) because a hidden window cannot be captured
+(Unity on D3D12 logs `Failed to capture screen shot.`), so `play shot` needs it.
+
 Reset timing: Godot replies to `reset` without running a frame when the target is ready right away, so the first
 `step` starts on tick 0. Unity (and a Godot target whose `is_ready()` is false) runs frames until ready, so a target
 that advances its sim in `Update`/`_process` should not step before its first `apply_action`.
