@@ -55,6 +55,23 @@ test('inversions: a scripted policy below random always counts; declared order c
   assert.match(titles(wrong), /"master" scores worse than the less skilled "expert"/);
 });
 
+test('a declared skillOrder that leaves out a policy that ran (idle) never reads it', () => {
+  const f = computeFun(botsOf({ idle: () => 0, random: (s) => 5 + (s % 3), solver: (s) => 90 + (s % 5) }), { skillOrder: ['random', 'solver'] });
+  assert.strictEqual(f.skill.floor, 'random');
+  assert.ok(Number.isFinite(f.skill.spread), `spread ${f.skill.spread}`);
+  assert.doesNotMatch(renderFun(f).join('\n'), /NaN/);
+  const g = computeFun(botsOf({ random: () => 95, solver: () => 100 }), { skillOrder: ['solver'] });
+  assert.strictEqual(g.skill.randomShare, undefined, 'random outside the order is not compared');
+});
+
+test('engine-side policies ({"policy": name} actions) are not reported as "mostly one action"', () => {
+  const rows = botsOf({ random: () => 1, solver: () => 9 }).rows.map((r) => ({ ...r, actionMix: { kinds: 1, changes: 1, top: [[`{"policy":"${r.policy}"}`, 1]] } }));
+  const f = computeFun({ rows });
+  assert.strictEqual(f.actions.engineSide, true);
+  assert.match(renderFun(f).join('\n'), /engine-side/);
+  assert.doesNotMatch(renderFun(f).join('\n'), /mostly one action/);
+});
+
 test('flat gradient: skill barely changes the score', () => {
   const f = computeFun(botsOf({ idle: () => 95, expert: () => 100 }));
   assert.match(titles(f), /Skill barely changes the score/);

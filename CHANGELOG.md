@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.1 (2026-09-28)
+
+Fixes from the first non-score game on the fun report (a deterministic narrative puzzle, Unity).
+
+- A declared `fun.skillOrder` that leaves out a policy that ran (e.g. idle) printed "best is NaN% above idle": the
+  floor and the random comparison now only use policies in the order.
+- Engine-side bots, whose adapter only sends `{"policy": name}`, were reported as "mostly one action". The action
+  mix is now skipped for them, since their real choices never reach the lab.
+
 ## 0.3.0 (2026-09-27)
 
 The fun report: balance numbers from the bot runs you already have.

@@ -89,8 +89,9 @@ function skillOrderOf(table, cfg) {
 function skillGradient(table, order, cfg, out) {
   const m = Object.fromEntries(order.map((n) => [n, mean(Object.values(table[n]))]));
   const best = order.reduce((a, b) => (m[b] > m[a] ? b : a), order[0]);
-  // "No skill" reference: idle when there is one, else the weakest policy.
-  const floorName = table.idle ? 'idle' : order.reduce((a, b) => (m[b] < m[a] ? b : a), order[0]);
+  // "No skill" reference: idle when it is in the order, else the weakest policy. A declared skillOrder may leave
+  // idle out even though it ran, so only policies in the order count.
+  const floorName = order.includes('idle') ? 'idle' : order.reduce((a, b) => (m[b] < m[a] ? b : a), order[0]);
   const floor = m[floorName];
   const shown = (v) => r3(cfg.better === 'lower' ? -v : v);
   const g = { order, declared: !!cfg.skillOrder, means: Object.fromEntries(order.map((n) => [n, shown(m[n])])), best, inversions: [] };
@@ -110,7 +111,7 @@ function skillGradient(table, order, cfg, out) {
   if (g.spread !== null && order.length > 1 && g.spread < cfg.minSpread) {
     out.findings.push({ severity: 'P2', category: 'balance', title: 'Skill barely changes the score', evidence: `best policy "${best}" ${shown(m[best])} vs ${floorName} ${shown(floor)} (${pct(g.spread)} of the best score)` });
   }
-  if (table.random && best !== 'random' && range > 1e-9) {
+  if (order.includes('random') && best !== 'random' && range > 1e-9) {
     g.randomShare = r3((m.random - floor) / range);
     if (g.randomShare >= cfg.randomMax) {
       out.findings.push({ severity: 'P2', category: 'balance', title: `Random play gets ${pct(g.randomShare)} of the way to the best policy`, evidence: `${cfg.metric}: random ${shown(m.random)}, best "${best}" ${shown(m[best])}${floorName !== 'random' ? `, ${floorName} ${shown(floor)}` : ''}; decisions barely matter` });
@@ -175,6 +176,8 @@ function actionMix(rows, policy) {
   const mixes = rows.filter((r) => r.policy === policy && r.actionMix).map((r) => r.actionMix);
   if (!mixes.length) return null;
   if (mixes.some((m) => !m.top.length)) return { policy, continuous: true };
+  // Engine-side bots (the adapter only sends {"policy": name}) hide their real choices from the lab.
+  if (mixes.every((m) => m.kinds === 1 && /^\{"policy":/.test(m.top[0][0]))) return { policy, engineSide: true };
   const share = {};
   for (const m of mixes) for (const [k, v] of m.top) share[k] = (share[k] || 0) + v / mixes.length;
   const top = Object.entries(share).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([k, v]) => [k, r3(v)]);
@@ -254,7 +257,8 @@ function renderFun(f) {
   if (f.luck) L.push(f.luck.note ? `- **Luck vs skill:** ${f.luck.note}` : `- **Luck vs skill** (${f.luck.policies.join(', ')} × ${f.luck.seeds} seeds): skill ${pct(f.luck.skill)} · luck ${pct(f.luck.luck)} · seed × policy ${pct(f.luck.rest)}`);
   if (f.upsets && f.upsets.length) L.push(`- **Upsets** (less skilled policy wins the same seed): ${f.upsets.map((u) => `${u.lower} over ${u.higher} ${pct(u.rate)}`).join(', ')}`);
   if (f.strategies) L.push(f.strategies.note ? `- **Strategies:** ${f.strategies.note}` : `- **Strategies** (win share): ${Object.entries(f.strategies.winShare).map(([n, v]) => `${n} ${pct(v)}`).join(', ')}${f.strategies.dominant ? ` → **"${f.strategies.dominant}" dominates**` : ''}`);
-  if (f.actions) L.push(f.actions.continuous ? `- **Action mix** ("${f.actions.policy}"): continuous actions, skipped` : `- **Action mix** ("${f.actions.policy}", ${f.actions.kinds} distinct per run): ${f.actions.top.map(([k, v]) => `\`${k}\` ${pct(v)}`).join(', ')}${f.actions.oneAction ? ' → mostly one action' : ''}`);
+  if (f.actions && f.actions.engineSide) L.push(`- **Action mix** ("${f.actions.policy}"): the policy runs engine-side, so its choices are not visible to the lab; skipped`);
+  else if (f.actions) L.push(f.actions.continuous ? `- **Action mix** ("${f.actions.policy}"): continuous actions, skipped` : `- **Action mix** ("${f.actions.policy}", ${f.actions.kinds} distinct per run): ${f.actions.top.map(([k, v]) => `\`${k}\` ${pct(v)}`).join(', ')}${f.actions.oneAction ? ' → mostly one action' : ''}`);
   if (f.tension) {
     L.push('- **Tension** (start → end of run, 10 slices):');
     for (const [p, c] of Object.entries(f.tension.curves)) L.push(`  - \`${spark(c)}\` ${p}`);
